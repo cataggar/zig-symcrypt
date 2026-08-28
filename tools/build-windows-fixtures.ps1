@@ -63,6 +63,7 @@ if (git -C $Source status --porcelain --untracked-files=no) {
 
 $project = Join-Path $Source "modules/windows/user/symcrypt.vcxproj"
 $definition = Join-Path $Source "modules/windows/user/symcrypt.def"
+$staticCoreProject = Join-Path $Source "lib/symcrypt_static_c_core.vcxproj"
 $windowsProps = Join-Path $Source "msbuild/windows.undocked.props"
 try {
     $projectText = Get-Content $project -Raw
@@ -77,6 +78,24 @@ try {
         "NAME $dynamicName.dll"
     )
     Set-Content $definition $definitionText -NoNewline
+    $staticCoreProjectText = Get-Content $staticCoreProject -Raw
+    foreach ($environmentSource in @(
+        "env_windowsBootLib.c",
+        "env_windowsKernelDebugger.c",
+        "env_windowsKernelModeWin7.c",
+        "env_windowsKernelModeWin8_1.c"
+    )) {
+        $compileEntry = "    <ClCompile Include=`"$environmentSource`" />"
+        if (-not $staticCoreProjectText.Contains($compileEntry)) {
+            throw "missing expected static environment source entry: $environmentSource"
+        }
+        $staticCoreProjectText = $staticCoreProjectText.Replace("$compileEntry`r`n", "")
+        $staticCoreProjectText = $staticCoreProjectText.Replace("$compileEntry`n", "")
+        if ($staticCoreProjectText.Contains($compileEntry)) {
+            throw "failed to exclude static kernel environment source: $environmentSource"
+        }
+    }
+    Set-Content $staticCoreProject $staticCoreProjectText -NoNewline
     $propsText = Get-Content $windowsProps -Raw
     $propsText = $propsText.Replace(
         "<SpectreMitigation>Spectre</SpectreMitigation>",
@@ -110,6 +129,7 @@ try {
     git -C $Source checkout -- `
         modules/windows/user/symcrypt.vcxproj `
         modules/windows/user/symcrypt.def `
+        lib/symcrypt_static_c_core.vcxproj `
         msbuild/windows.undocked.props
 }
 
@@ -145,6 +165,7 @@ python (Join-Path $PSScriptRoot "fixture_manifest.py") create `
     --source $Source `
     --target $target `
     --build-option "MSBuild user-mode module and symcrypt_plus projects" `
+    --build-option "static core excludes unused boot and kernel environment objects" `
     --build-option "config=Release" `
     --build-option "spectre=false (hosted runner lacks Spectre libraries; CI fixture only)" `
     --build-option "dynamic-name=$dynamicName" `

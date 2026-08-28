@@ -77,7 +77,7 @@ BOOLEAN SymCryptZigTestConsumeDeferredAllocationFailure(void)
     if (!atomic_load_explicit(&g_symcrypt_zig_fail_enabled, memory_order_acquire) ||
         !atomic_load_explicit(&g_symcrypt_zig_defer_failure, memory_order_relaxed))
     {
-        return FALSE;
+        return (BOOLEAN)0;
     }
     SymCryptZigAllocationLock();
     BOOLEAN result =
@@ -86,7 +86,7 @@ BOOLEAN SymCryptZigTestConsumeDeferredAllocationFailure(void)
         atomic_exchange_explicit(
         &g_symcrypt_zig_deferred_failure_hit,
         false,
-        memory_order_relaxed) ? TRUE : FALSE;
+        memory_order_relaxed) ? (BOOLEAN)1 : (BOOLEAN)0;
     SymCryptZigAllocationUnlock();
     return result;
 }
