@@ -28,6 +28,9 @@ two-linkage, two-optimization matrix before creating or uploading any archive.
    both linkage modes on all four native targets.
 5. Rebuild immutable fixtures, regenerate their SHA-256 provenance manifests,
    and review the exact dynamic/static library lists and system dependencies.
+   Linux uses upstream `scripts/build.py cmake`; Windows builds the pinned
+   user-mode module and `symcrypt_plus` MSBuild projects, not unrelated
+   kernel/WDK projects.
 6. Refresh `LICENSE`, the complete unmodified upstream `NOTICE.txt`, provenance
    notes, target/linking/initialization/FIPS documentation, examples, package
    allow-list, and any security implications.

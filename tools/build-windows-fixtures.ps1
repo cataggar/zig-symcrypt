@@ -8,11 +8,11 @@ $ErrorActionPreference = "Stop"
 $expected = "286762b7730e2b780678f5ab11fef2b1bad639e0"
 $dynamicName = "symcrypt_zig_103_13"
 if ($Architecture -eq "x86_64") {
-    $upstreamArch = "amd64"
+    $platform = "x64"
     $flavor = "amd64fre"
     $target = "x86_64-windows-msvc"
 } else {
-    $upstreamArch = "arm64"
+    $platform = "ARM64"
     $flavor = "arm64fre"
     $target = "aarch64-windows-msvc"
 }
@@ -77,11 +77,24 @@ try {
     )
     Set-Content $windowsProps $propsText -NoNewline
 
-    python (Join-Path $Source "scripts/build.py") msbuild `
-        --arch $upstreamArch `
-        --config Release
+    $solutionDir = (Resolve-Path $Source).Path + "\"
+    msbuild $project `
+        /m /t:Rebuild `
+        /p:Platform=$platform `
+        /p:Configuration=Release `
+        /p:SolutionDir="$solutionDir" `
+        /p:SpectreMitigation=false
     if ($LASTEXITCODE -ne 0) {
-        throw "pinned SymCrypt MSBuild failed with exit code $LASTEXITCODE"
+        throw "pinned SymCrypt module MSBuild failed with exit code $LASTEXITCODE"
+    }
+    msbuild (Join-Path $Source "lib_plus/symcrypt_plus.vcxproj") `
+        /m /t:Rebuild `
+        /p:Platform=$platform `
+        /p:Configuration=Release `
+        /p:SolutionDir="$solutionDir" `
+        /p:SpectreMitigation=false
+    if ($LASTEXITCODE -ne 0) {
+        throw "pinned symcrypt_plus MSBuild failed with exit code $LASTEXITCODE"
     }
 } finally {
     git -C $Source checkout -- `
@@ -117,7 +130,7 @@ python (Join-Path $PSScriptRoot "fixture_manifest.py") create `
     --root $Output `
     --source $Source `
     --target $target `
-    --build-option "scripts/build.py msbuild" `
+    --build-option "MSBuild user-mode module and symcrypt_plus projects" `
     --build-option "config=Release" `
     --build-option "spectre=false (hosted runner lacks Spectre libraries; CI fixture only)" `
     --build-option "dynamic-name=$dynamicName" `
