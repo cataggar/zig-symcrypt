@@ -226,6 +226,7 @@ def create(args: argparse.Namespace) -> None:
             "machine": platform.machine(),
             "compiler": compiler,
         },
+        "build_options": args.build_option,
         "libraries": entries_by_linkage,
     }
     output = pathlib.Path(args.output or fixture_root / "provenance.json")
@@ -242,6 +243,15 @@ def verify(args: argparse.Namespace) -> None:
             fail(f"manifest {field} is {manifest.get(field)!r}, expected {pin.get(field)!r}")
     if manifest.get("target") != args.target:
         fail(f"manifest target is {manifest.get('target')!r}, expected {args.target!r}")
+    build_options = manifest.get("build_options")
+    if not isinstance(build_options, list) or "config=Release" not in build_options:
+        fail("manifest does not record the required Release fixture configuration")
+    if args.target.endswith("-linux-gnu") and "fips=upstream-default" not in build_options:
+        fail("Linux manifest does not record upstream-default module self-test configuration")
+    if args.target.endswith("-windows-msvc") and not any(
+        option.startswith("dynamic-name=symcrypt_zig_103_13") for option in build_options
+    ):
+        fail("Windows manifest does not record the unique pinned test DLL name")
     if args.linkage not in ("dynamic", "static"):
         fail(f"unsupported linkage '{args.linkage}'")
     entries = manifest.get("libraries", {}).get(args.linkage)
@@ -282,6 +292,7 @@ def parser() -> argparse.ArgumentParser:
     create_parser.add_argument("--target", required=True)
     create_parser.add_argument("--output")
     create_parser.add_argument("--library", action="append", required=True)
+    create_parser.add_argument("--build-option", action="append", default=[])
     create_parser.set_defaults(function=create)
     verify_parser = sub.add_parser("verify")
     verify_parser.add_argument("--manifest", required=True)

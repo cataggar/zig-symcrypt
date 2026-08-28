@@ -13,3 +13,9 @@ integrity postprocessing, and ABI checks do not establish validation. Static
 linkage and custom/source builds are not claimed to be FIPS validated or
 FIPS-capable. Consumers are responsible for selecting and operating an
 applicable upstream validated module and for satisfying all policy requirements.
+
+Windows CI renames its DLL to prevent accidental loading of the inbox module and
+disables Spectre-library linkage because the public hosted images do not install
+those optional libraries. This test-only hardening difference is recorded in
+the provenance manifest and is another reason the fixture is not distributable
+or a validation boundary.

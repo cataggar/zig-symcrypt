@@ -63,6 +63,11 @@ def base_manifest(plus: pathlib.Path, core: pathlib.Path) -> dict:
         **PIN,
         "target": "aarch64-linux-gnu",
         "host": {},
+        "build_options": [
+            "scripts/build.py cmake",
+            "config=Release",
+            "fips=upstream-default",
+        ],
         "libraries": {
             "dynamic": [
                 {

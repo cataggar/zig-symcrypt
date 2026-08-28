@@ -62,6 +62,8 @@ expect_failure wrong-version "expected 103.13.0, found 103.14.0" \
 cp ci/symcrypt-fixtures.json "$scratch/altered-provenance.json"
 sed -i 's/286762b7730e2b780678f5ab11fef2b1bad639e0/0000000000000000000000000000000000000000/' \
     "$scratch/altered-provenance.json"
+rm -f zig-out/release/zig-symcrypt-0.1.0.tar.gz \
+    zig-out/release/zig-symcrypt-0.1.0.tar.gz.sha256
 expect_failure altered-provenance "manifest commit" \
     python3 tools/fixture_manifest.py verify \
       --manifest "$scratch/altered-provenance.json" \

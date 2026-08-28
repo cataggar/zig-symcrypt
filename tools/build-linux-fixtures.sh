@@ -120,6 +120,10 @@ python3 "$(dirname "$0")/fixture_manifest.py" create \
     --root "$output_dir" \
     --source "$source_dir" \
     --target "$target" \
+    --build-option "scripts/build.py cmake" \
+    --build-option "config=Release" \
+    --build-option "fips=upstream-default" \
+    --build-option "fips-postprocess=upstream-default" \
     --library "dynamic:plus:$static_plus" \
     --library "dynamic:core:$shared" \
     --library "static:plus:$static_plus" \

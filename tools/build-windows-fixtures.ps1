@@ -53,6 +53,7 @@ if (git -C $Source status --porcelain --untracked-files=no) {
 
 $project = Join-Path $Source "modules/windows/user/symcrypt.vcxproj"
 $definition = Join-Path $Source "modules/windows/user/symcrypt.def"
+$windowsProps = Join-Path $Source "msbuild/windows.undocked.props"
 try {
     $projectText = Get-Content $project -Raw
     $projectText = $projectText.Replace(
@@ -66,6 +67,15 @@ try {
         "NAME $dynamicName.dll"
     )
     Set-Content $definition $definitionText -NoNewline
+    $propsText = Get-Content $windowsProps -Raw
+    $propsText = $propsText.Replace(
+        "<SpectreMitigation>Spectre</SpectreMitigation>",
+        "<SpectreMitigation>false</SpectreMitigation>"
+    ).Replace(
+        "<Driver_SpectreMitigation>Spectre</Driver_SpectreMitigation>",
+        "<Driver_SpectreMitigation>false</Driver_SpectreMitigation>"
+    )
+    Set-Content $windowsProps $propsText -NoNewline
 
     python (Join-Path $Source "scripts/build.py") msbuild `
         --arch $upstreamArch `
@@ -74,7 +84,10 @@ try {
         throw "pinned SymCrypt MSBuild failed with exit code $LASTEXITCODE"
     }
 } finally {
-    git -C $Source checkout -- modules/windows/user/symcrypt.vcxproj modules/windows/user/symcrypt.def
+    git -C $Source checkout -- `
+        modules/windows/user/symcrypt.vcxproj `
+        modules/windows/user/symcrypt.def `
+        msbuild/windows.undocked.props
 }
 
 $base = Join-Path $Source "build/bin/$flavor"
@@ -104,6 +117,10 @@ python (Join-Path $PSScriptRoot "fixture_manifest.py") create `
     --root $Output `
     --source $Source `
     --target $target `
+    --build-option "scripts/build.py msbuild" `
+    --build-option "config=Release" `
+    --build-option "spectre=false (hosted runner lacks Spectre libraries; CI fixture only)" `
+    --build-option "dynamic-name=$dynamicName" `
     --library "dynamic:plus:$(Join-Path $Output 'lib/symcrypt_plus_NoCIL.lib')" `
     --library "dynamic:core:$(Join-Path $Output "dll/$dynamicName.lib")" `
     --library "static:plus:$(Join-Path $Output 'lib/symcrypt_plus_NoCIL.lib')" `
