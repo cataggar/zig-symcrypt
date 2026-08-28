@@ -38,6 +38,17 @@ pub fn build(b: *std.Build) void {
         "legacy",
         "Expose legacy MD5 and SHA-1 APIs for compatibility/integrity-only use",
     ) orelse false;
+    const legacy_rsa = b.option(
+        bool,
+        "enable_legacy_rsa_pkcs1_encryption",
+        "Expose legacy RSAES-PKCS1-v1_5 encryption/decryption APIs",
+    ) orelse false;
+    const mlkem = b.option(bool, "enable_mlkem", "Enable ML-KEM-768 (currently unavailable)") orelse false;
+    const tls_hybrid = b.option(
+        bool,
+        "enable_tls_x25519_mlkem768",
+        "Enable RFC 10024 X25519MLKEM768 (currently unavailable)",
+    ) orelse false;
     const headers_only = b.option(
         bool,
         "headers_only",
@@ -47,7 +58,22 @@ pub fn build(b: *std.Build) void {
     const target_ok = validateTarget(b, target, system_include_dirs);
     const libraries_ok = if (headers_only) true else validateLibraries(b, target, linkage, libraries);
 
-    const options = makeOptions(b, linkage, include_dir, checked, false, legacy);
+    if (mlkem or tls_hybrid) {
+        const fail = b.addFail(
+            "ML-KEM-768 and RFC 10024 X25519MLKEM768 remain unavailable until independent FIPS 203 and TLS interoperability vectors are included",
+        );
+        b.getInstallStep().dependOn(&fail.step);
+        b.step("test", "Run native initialization, hash, asymmetric, callback, and concurrency tests")
+            .dependOn(&fail.step);
+        b.step("test-compile", "Compile and link native tests without running them")
+            .dependOn(&fail.step);
+        b.step("example", "Build initialization and asymmetric examples").dependOn(&fail.step);
+        b.step("abi-local", "Compile host-available ABI checks").dependOn(&fail.step);
+        b.step("abi", "Compile the full ABI matrix").dependOn(&fail.step);
+        return;
+    }
+
+    const options = makeOptions(b, linkage, include_dir, checked, false, legacy, legacy_rsa);
     const symcrypt = b.addModule("symcrypt", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -64,12 +90,12 @@ pub fn build(b: *std.Build) void {
         "abi-local",
         "Compile pinned header and ABI checks for targets available from this host/toolchain",
     );
-    addAbiMatrix(b, abi_local_step, include_dir, system_include_dirs, legacy, .local_available);
+    addAbiMatrix(b, abi_local_step, include_dir, system_include_dirs, legacy, legacy_rsa, .local_available);
     const abi_step = b.step(
         "abi",
         "Compile pinned header and ABI checks for all supported targets (Windows SDK required)",
     );
-    addAbiMatrix(b, abi_step, include_dir, system_include_dirs, legacy, .full);
+    addAbiMatrix(b, abi_step, include_dir, system_include_dirs, legacy, legacy_rsa, .full);
 
     if (!headers_only and libraries.len == 0) {
         const fail = b.addFail(
@@ -104,6 +130,7 @@ pub fn build(b: *std.Build) void {
         system_include_dirs,
         checked,
         legacy,
+        legacy_rsa,
         test_step,
         test_compile_step,
     );
@@ -128,13 +155,25 @@ pub fn build(b: *std.Build) void {
         .name = "symcrypt-symmetric",
         .root_module = symmetric_example_mod,
     });
-    const example_step = b.step("example", "Build initialization and symmetric examples");
+    const asymmetric_example_mod = b.createModule(.{
+        .root_source_file = b.path("examples/asymmetric.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    asymmetric_example_mod.addImport("symcrypt", symcrypt);
+    const asymmetric_example = b.addExecutable(.{
+        .name = "symcrypt-asymmetric",
+        .root_module = asymmetric_example_mod,
+    });
+    const example_step = b.step("example", "Build initialization, symmetric, and asymmetric examples");
     example_step.dependOn(&example.step);
     example_step.dependOn(&symmetric_example.step);
+    example_step.dependOn(&asymmetric_example.step);
 
     b.getInstallStep().dependOn(abi_local_step);
     b.getInstallStep().dependOn(&example.step);
     b.getInstallStep().dependOn(&symmetric_example.step);
+    b.getInstallStep().dependOn(&asymmetric_example.step);
 }
 
 fn makeOptions(
@@ -144,6 +183,7 @@ fn makeOptions(
     checked: bool,
     init_test_hooks: bool,
     legacy: bool,
+    legacy_rsa: bool,
 ) *std.Build.Step.Options {
     const options = b.addOptions();
     options.addOption([]const u8, "linkage", @tagName(linkage));
@@ -151,6 +191,9 @@ fn makeOptions(
     options.addOption(bool, "checked", checked);
     options.addOption(bool, "init_test_hooks", init_test_hooks);
     options.addOption(bool, "legacy", legacy);
+    options.addOption(bool, "enable_legacy_rsa_pkcs1_encryption", legacy_rsa);
+    options.addOption(bool, "enable_mlkem", false);
+    options.addOption(bool, "enable_tls_x25519_mlkem768", false);
     return options;
 }
 
@@ -245,10 +288,15 @@ fn validateLibraries(
     }
 
     var ok = true;
+    var has_plus = false;
     for (libraries) |library| {
         const path = library.getDisplayName();
+        has_plus = has_plus or std.mem.indexOf(u8, std.fs.path.basename(path), "symcrypt_plus") != null;
         const valid = if (target.result.os.tag == .linux)
-            if (linkage == .dynamic) isSharedObject(path) else std.mem.endsWith(u8, path, ".a")
+            if (linkage == .dynamic)
+                isSharedObject(path) or std.mem.endsWith(u8, path, "libsymcrypt_plus.a")
+            else
+                std.mem.endsWith(u8, path, ".a")
         else
             std.mem.endsWith(u8, path, ".lib");
         if (!valid) {
@@ -271,6 +319,13 @@ fn validateLibraries(
             ok = false;
         }
     }
+    if (!has_plus) {
+        std.log.err(
+            "missing pinned symcrypt_plus static companion library required for checked SEC1/X25519 IETF encodings",
+            .{},
+        );
+        ok = false;
+    }
     if (!ok) b.invalid_user_input = true;
     return ok;
 }
@@ -290,6 +345,7 @@ fn addAbiMatrix(
     include_dir: std.Build.LazyPath,
     system_include_dirs: []const std.Build.LazyPath,
     legacy: bool,
+    legacy_rsa: bool,
     matrix: AbiMatrix,
 ) void {
     const windows_available =
@@ -311,7 +367,7 @@ fn addAbiMatrix(
         if (query.os_tag == .windows and !windows_available) continue;
         inline for (.{ false, true }) |checked| {
             const target = b.resolveTargetQuery(query);
-            const options = makeOptions(b, .dynamic, include_dir, checked, false, legacy);
+            const options = makeOptions(b, .dynamic, include_dir, checked, false, legacy, legacy_rsa);
             const module = b.createModule(.{
                 .root_source_file = b.path("src/root.zig"),
                 .target = target,
@@ -342,6 +398,7 @@ fn addNativeTests(
     system_include_dirs: []const std.Build.LazyPath,
     checked: bool,
     legacy: bool,
+    legacy_rsa: bool,
     test_step: *std.Build.Step,
     test_compile_step: *std.Build.Step,
 ) void {
@@ -360,7 +417,29 @@ fn addNativeTests(
     test_compile_step.dependOn(&tests.step);
     test_step.dependOn(&run_tests.step);
 
-    const concurrency_options = makeOptions(b, linkage, include_dir, checked, true, legacy);
+    const package_test_options = makeOptions(b, linkage, include_dir, checked, false, legacy, legacy_rsa);
+    const package_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    configureHeaders(
+        package_test_mod,
+        include_dir,
+        system_include_dirs,
+        checked,
+        package_test_options,
+    );
+    for (symcrypt.link_objects.items) |object| {
+        package_test_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
+    }
+    const package_tests = b.addTest(.{ .root_module = package_test_mod });
+    const run_package_tests = b.addRunArtifact(package_tests);
+    test_compile_step.dependOn(&package_tests.step);
+    test_step.dependOn(&run_package_tests.step);
+
+    const concurrency_options = makeOptions(b, linkage, include_dir, checked, true, legacy, legacy_rsa);
     const concurrency_mod = b.createModule(.{
         .root_source_file = b.path("src/init_concurrency_test.zig"),
         .target = target,
@@ -383,7 +462,7 @@ fn addNativeTests(
     test_step.dependOn(&run_concurrency.step);
 
     if (linkage == .dynamic) {
-        const mismatch_options = makeOptions(b, .dynamic, include_dir, checked, false, legacy);
+        const mismatch_options = makeOptions(b, .dynamic, include_dir, checked, false, legacy, legacy_rsa);
         const mismatch_mod = b.createModule(.{
             .root_source_file = b.path("src/mismatch_test.zig"),
             .target = target,

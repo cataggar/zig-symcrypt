@@ -23,7 +23,10 @@ const dep = b.dependency("zig_symcrypt", .{
     .target = target,
     .optimize = optimize,
     .linkage = .dynamic,
-    .symcrypt_libraries = &.{.{ .cwd_relative = "/opt/symcrypt/lib/libsymcrypt.so" }},
+    .symcrypt_libraries = &.{
+        .{ .cwd_relative = "/opt/symcrypt/lib/libsymcrypt_plus.a" },
+        .{ .cwd_relative = "/opt/symcrypt/lib/libsymcrypt.so" },
+    },
 });
 root_module.addImport("symcrypt", dep.module("symcrypt"));
 ```
@@ -31,7 +34,9 @@ root_module.addImport("symcrypt", dep.module("symcrypt"));
 Options:
 
 - `linkage`: `dynamic` (default) or `static`.
-- `symcrypt_libraries`: required ordered exact library paths.
+- `symcrypt_libraries`: required ordered exact library paths. The pinned
+  `symcrypt_plus` static companion must come first for either core linkage mode;
+  it supplies the checked SEC1 and RFC 7748 IETF encodings.
 - `symcrypt_include_dir`: optional complete header directory; defaults to the
   bundled pin and is rejected at compile time unless it is exactly 103.13.0.
 - `symcrypt_system_include_dirs`: optional ordered SDK/CRT include paths for
@@ -40,6 +45,12 @@ Options:
 - `legacy`: expose MD5 and SHA-1 hash, HMAC, and HKDF algorithm tags/types.
   It defaults to `false`, is intended only for compatibility or integrity-only
   consumers, and does not imply FIPS approval.
+- `enable_legacy_rsa_pkcs1_encryption`: expose RSAES-PKCS1-v1_5 encryption and
+  decryption under `asymmetric.rsa.legacy`. This padding-oracle-sensitive API
+  defaults off independently of legacy hashes.
+- `enable_mlkem` and `enable_tls_x25519_mlkem768`: deliberately unavailable fail-closed
+  gates. SymCrypt's composite ML-KEM is not RFC 10024; independent FIPS 203
+  and RFC 10024/TLS interoperability fixtures are required before enabling.
 - `headers_only`: package-maintainer ABI compilation without native binaries.
 
 Maintainer validation distinguishes checks available from the current host from
@@ -64,16 +75,19 @@ For command-line use, repeat the path option to preserve archive order:
 
 ```sh
 zig build test -Dlinkage=dynamic \
+  -Dsymcrypt_libraries=/opt/symcrypt/lib/libsymcrypt_plus.a \
   -Dsymcrypt_libraries=/opt/symcrypt/lib/libsymcrypt.so
 
 zig build test -Dlinkage=static \
+  -Dsymcrypt_libraries=/opt/symcrypt/lib/libsymcrypt_plus.a \
   -Dsymcrypt_libraries=/opt/symcrypt/lib/libsymcrypt_posixusermode.a \
   -Dsymcrypt_libraries=/opt/symcrypt/lib/libsymcrypt_common.a \
   -Dsymcrypt_libraries=/opt/symcrypt/lib/libsymcrypt_mlkem.a
 ```
 
-Windows dynamic mode takes the import `symcrypt.lib`, never the DLL. Static
-mode should use `symcrypt_static_NoCIL.lib`. Windows builds require native
+Windows dynamic mode takes `symcrypt_plus_NoCIL.lib` followed by the core
+import `symcrypt.lib`, never the DLL. Static mode takes
+`symcrypt_plus_NoCIL.lib` followed by `symcrypt_static_NoCIL.lib`. Windows builds require native
 MSVC/SDK discovery. Linux dynamic deployments must make the matching SONAME
 reachable through normal loader paths or an application-owned rpath. Put
 `symcrypt.dll` beside the Windows executable or on its documented DLL search
@@ -242,4 +256,61 @@ APIs.
 
 See the generic `examples/initialize.zig`, linkage-specific
 `initialize_dynamic.zig`/`initialize_static.zig`, and
+`examples/symmetric.zig`, `examples/asymmetric.zig`, and
 `test/fixtures/README.md`.
+
+## Asymmetric cryptography
+
+`symcrypt.asymmetric` provides allocator-owned opaque keys for:
+
+- P-256, P-384, and P-521 generation, fixed-width private scalar import/export,
+  SEC1 uncompressed public import/export, immutable ECDSA/ECDH usage, ECDH, and
+  canonical DER ECDSA;
+- X25519 through SymCrypt Curve25519, with RFC 7748 little-endian encoding,
+  u-coordinate normalization, and low-order/all-zero agreement rejection;
+- RSA 2048–16384-bit two-prime generation, checked raw component import/export,
+  immutable usage, PKCS#1 v1.5 signatures, PSS, and OAEP.
+
+Advertised asymmetric algorithm matrix:
+
+| Operation | Algorithms |
+|---|---|
+| ECDH/ECDSA | P-256/P-384/P-521 with SHA-256/384/512 and SHA3-256/384/512, using normal ECDSA digest truncation |
+| X25519 | RFC 7748 Curve25519, 32-byte little-endian private/public/shared values |
+| RSA PKCS#1 signatures | SHA-256/384/512 and SHA3-256/384/512 |
+| RSA-PSS and RSA-OAEP | SHA-256/384/512 and SHA3-256/384/512 |
+| Legacy hash gate | ECDSA SHA-1; RSA PKCS#1 SHA-1/MD5; RSA-PSS/OAEP SHA-1 |
+
+The native matrix exercises every listed ECDSA curve/hash combination, generates
+2048-, 3072-, and 4096-bit RSA keys, and exercises each modern RSA SHA-2/SHA-3 row.
+Pinned NIST vectors cover ECDH/ECDSA on all three
+curves, RFC 7748 covers base and 1,000-iteration X25519 behavior, and pinned
+RSA vectors cover PKCS#1, PSS, and OAEP independently of generated round trips.
+
+```zig
+const private = try symcrypt.asymmetric.ecc.PrivateKey.generate(
+    allocator,
+    .p256,
+    .signing_and_agreement,
+);
+defer private.deinit();
+const public = try private.publicKey(allocator);
+defer public.deinit();
+
+const digest = try symcrypt.hash.digest(.sha256, "message");
+var signature: [139]u8 = undefined;
+const signature_len = try private.sign(.sha256, &digest, &signature);
+try public.verify(.sha256, &digest, signature[0..signature_len]);
+```
+
+ECDSA decoding accepts exactly one minimally encoded
+`SEQUENCE(INTEGER r, INTEGER s)` and rejects negative, redundant, truncated,
+overflowing, extra, and trailing encodings without modifying the destination.
+RSA PKCS#1 signature `DigestInfo` is assembled from a stable allow-list in Zig,
+avoiding SymCrypt's private OID layout. Failed OAEP and gated legacy decryptions
+wipe the complete caller output. Owning handles must be destroyed exactly once;
+their aliases become invalid after `deinit`. Modulus-sized PKCS#1/PSS signature
+representatives outside the RSA modulus are reported as `error.InvalidSignature`;
+caller length/hash/usage errors remain distinct. RSA component imports reject
+zero-prefixed and even big-endian moduli before allocation. X25519's public
+slice APIs validate 32-byte lengths before fixed-size normalization.

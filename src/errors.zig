@@ -34,6 +34,12 @@ pub const SymCryptError = error{
 pub const Error = InitError || SymCryptError || error{
     InvalidState,
     OverlappingBuffers,
+    InvalidUsage,
+    InvalidLength,
+    InvalidEncoding,
+    InvalidSignature,
+    KeyMismatch,
+    MessageTooLong,
 };
 
 pub const KnownError = enum {

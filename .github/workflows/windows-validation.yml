@@ -115,13 +115,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "SymCrypt MSBuild failed with exit code $LASTEXITCODE"
           }
+          msbuild "SymCrypt/lib_plus/symcrypt_plus.vcxproj" `
+            /m /t:Rebuild `
+            /p:Platform=${{ matrix.platform }} `
+            /p:Configuration=Release `
+            /p:SolutionDir="$solutionDir" `
+            /p:SpectreMitigation=false
+          if ($LASTEXITCODE -ne 0) {
+            throw "symcrypt_plus MSBuild failed with exit code $LASTEXITCODE"
+          }
 
           $base = Join-Path $env:GITHUB_WORKSPACE "SymCrypt/build/bin/${{ matrix.flavor }}"
           $dllDir = Join-Path $base "dll"
           $importLib = Join-Path $dllDir "$dynamicName.lib"
           $dll = Join-Path $dllDir "$dynamicName.dll"
           $staticLib = Join-Path $base "lib/symcrypt_static_NoCIL.lib"
-          foreach ($path in @($importLib, $dll, $staticLib)) {
+          $plusLib = Join-Path $base "lib/symcrypt_plus_NoCIL.lib"
+          foreach ($path in @($importLib, $dll, $staticLib, $plusLib)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
               throw "missing expected ${{ matrix.target }} SymCrypt artifact: $path"
             }
@@ -132,6 +142,7 @@ jobs:
             zig build test `
               -Dtarget=${{ matrix.target }} `
               -Dlinkage=dynamic `
+              -Dsymcrypt_libraries="$plusLib" `
               -Dsymcrypt_libraries="$importLib"
             if ($LASTEXITCODE -ne 0) {
               throw "dynamic Windows tests failed with exit code $LASTEXITCODE"
@@ -140,6 +151,8 @@ jobs:
               -Dtarget=${{ matrix.target }} `
               -Dlinkage=dynamic `
               -Dlegacy=true `
+              -Denable_legacy_rsa_pkcs1_encryption=true `
+              -Dsymcrypt_libraries="$plusLib" `
               -Dsymcrypt_libraries="$importLib"
             if ($LASTEXITCODE -ne 0) {
               throw "legacy dynamic Windows tests failed with exit code $LASTEXITCODE"
@@ -147,6 +160,7 @@ jobs:
             zig build test `
               -Dtarget=${{ matrix.target }} `
               -Dlinkage=static `
+              -Dsymcrypt_libraries="$plusLib" `
               -Dsymcrypt_libraries="$staticLib"
             if ($LASTEXITCODE -ne 0) {
               throw "static Windows tests failed with exit code $LASTEXITCODE"
@@ -155,6 +169,8 @@ jobs:
               -Dtarget=${{ matrix.target }} `
               -Dlinkage=static `
               -Dlegacy=true `
+              -Denable_legacy_rsa_pkcs1_encryption=true `
+              -Dsymcrypt_libraries="$plusLib" `
               -Dsymcrypt_libraries="$staticLib"
             if ($LASTEXITCODE -ne 0) {
               throw "legacy static Windows tests failed with exit code $LASTEXITCODE"
@@ -163,6 +179,7 @@ jobs:
             zig build test-compile `
               -Dtarget=${{ matrix.target }} `
               -Dlinkage=dynamic `
+              -Dsymcrypt_libraries="$plusLib" `
               -Dsymcrypt_libraries="$importLib"
             if ($LASTEXITCODE -ne 0) {
               throw "dynamic Windows compile-link failed with exit code $LASTEXITCODE"
@@ -171,6 +188,8 @@ jobs:
               -Dtarget=${{ matrix.target }} `
               -Dlinkage=dynamic `
               -Dlegacy=true `
+              -Denable_legacy_rsa_pkcs1_encryption=true `
+              -Dsymcrypt_libraries="$plusLib" `
               -Dsymcrypt_libraries="$importLib"
             if ($LASTEXITCODE -ne 0) {
               throw "legacy dynamic Windows compile-link failed with exit code $LASTEXITCODE"
@@ -178,6 +197,7 @@ jobs:
             zig build test-compile `
               -Dtarget=${{ matrix.target }} `
               -Dlinkage=static `
+              -Dsymcrypt_libraries="$plusLib" `
               -Dsymcrypt_libraries="$staticLib"
             if ($LASTEXITCODE -ne 0) {
               throw "static Windows compile-link failed with exit code $LASTEXITCODE"
@@ -186,6 +206,8 @@ jobs:
               -Dtarget=${{ matrix.target }} `
               -Dlinkage=static `
               -Dlegacy=true `
+              -Denable_legacy_rsa_pkcs1_encryption=true `
+              -Dsymcrypt_libraries="$plusLib" `
               -Dsymcrypt_libraries="$staticLib"
             if ($LASTEXITCODE -ne 0) {
               throw "legacy static Windows compile-link failed with exit code $LASTEXITCODE"

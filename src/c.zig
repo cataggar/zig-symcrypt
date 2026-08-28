@@ -11,6 +11,7 @@ pub const raw = @cImport({
     @cDefine("SYMCRYPT_ZIG_IMPORT", "1");
     @cInclude("stddef.h");
     @cInclude("symcrypt.h");
+    @cInclude("symcrypt_ec_encoding.h");
 });
 
 comptime {
