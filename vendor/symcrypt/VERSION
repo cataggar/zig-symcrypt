@@ -1,0 +1,7 @@
+tag=v103.13.0
+commit=286762b7730e2b780678f5ab11fef2b1bad639e0
+api=103
+minor=13
+patch=0
+source=https://github.com/microsoft/SymCrypt/tree/v103.13.0
+archive=https://github.com/microsoft/SymCrypt/archive/refs/tags/v103.13.0.tar.gz

@@ -1,0 +1,161 @@
+name: Windows validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  abi:
+    name: Full ABI matrix (Windows SDK)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.16.0
+      - name: Compile all FRE and checked ABI canaries
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $installation = & $vswhere -latest -version "[17.0,18.0)" -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+              Microsoft.VisualStudio.Component.VC.Tools.ARM64 `
+            -property installationPath
+          if (-not $installation) {
+            throw "Visual Studio with the MSVC ARM64 toolchain was not found"
+          }
+          . (Join-Path $installation "Common7/Tools/Launch-VsDevShell.ps1") `
+            -Arch arm64 -HostArch amd64 -SkipAutomaticLocation
+          zig build abi -Dheaders_only=true
+          if ($LASTEXITCODE -ne 0) {
+            throw "full ABI matrix failed with exit code $LASTEXITCODE"
+          }
+
+  link:
+    name: ${{ matrix.target }} (${{ matrix.execution }})
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-windows-msvc
+            platform: x64
+            flavor: amd64fre
+            dev_arch: amd64
+            execution: execute
+          - target: aarch64-windows-msvc
+            platform: ARM64
+            flavor: arm64fre
+            dev_arch: arm64
+            execution: build-only
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          repository: microsoft/SymCrypt
+          ref: 286762b7730e2b780678f5ab11fef2b1bad639e0
+          path: SymCrypt
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.16.0
+      - name: Build and validate pinned SymCrypt
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $installation = & $vswhere -latest -version "[17.0,18.0)" -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+              Microsoft.VisualStudio.Component.VC.Tools.ARM64 `
+            -property installationPath
+          if (-not $installation) {
+            throw "Visual Studio with the ${{ matrix.platform }} MSVC toolchain was not found"
+          }
+          . (Join-Path $installation "Common7/Tools/Launch-VsDevShell.ps1") `
+            -Arch ${{ matrix.dev_arch }} -HostArch amd64 -SkipAutomaticLocation
+
+          # CI fixtures are non-FIPS and use a unique DLL name to avoid the Windows inbox DLL.
+          $moduleProject = "SymCrypt/modules/windows/user/symcrypt.vcxproj"
+          $moduleDefinition = "SymCrypt/modules/windows/user/symcrypt.def"
+          $dynamicName = "symcrypt_zig_test"
+          $projectText = Get-Content -LiteralPath $moduleProject -Raw
+          $projectText = $projectText.Replace(
+            "SYMCRYPT_MODULE_DO_FIPS_SELFTESTS;",
+            "SYMCRYPT_MODULE_DO_FIPS_SELFTESTS=0;"
+          ).Replace(
+            "SYMCRYPT_MODULE_USE_FIPS_ENTROPY;",
+            "SYMCRYPT_MODULE_USE_FIPS_ENTROPY=0;"
+          ).Replace(
+            "<TargetName>symcrypt</TargetName>",
+            "<TargetName>$dynamicName</TargetName>"
+          )
+          Set-Content -LiteralPath $moduleProject -Value $projectText -NoNewline
+          $definitionText = Get-Content -LiteralPath $moduleDefinition -Raw
+          $definitionText = $definitionText.Replace(
+            "NAME symcrypt.dll",
+            "NAME $dynamicName.dll"
+          )
+          Set-Content -LiteralPath $moduleDefinition -Value $definitionText -NoNewline
+
+          $solutionDir = (Resolve-Path "SymCrypt").Path + "\"
+          msbuild $moduleProject `
+            /m /t:Rebuild `
+            /p:Platform=${{ matrix.platform }} `
+            /p:Configuration=Release `
+            /p:SolutionDir="$solutionDir" `
+            /p:SpectreMitigation=false
+          if ($LASTEXITCODE -ne 0) {
+            throw "SymCrypt MSBuild failed with exit code $LASTEXITCODE"
+          }
+
+          $base = Join-Path $env:GITHUB_WORKSPACE "SymCrypt/build/bin/${{ matrix.flavor }}"
+          $dllDir = Join-Path $base "dll"
+          $importLib = Join-Path $dllDir "$dynamicName.lib"
+          $dll = Join-Path $dllDir "$dynamicName.dll"
+          $staticLib = Join-Path $base "lib/symcrypt_static_NoCIL.lib"
+          foreach ($path in @($importLib, $dll, $staticLib)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "missing expected ${{ matrix.target }} SymCrypt artifact: $path"
+            }
+          }
+          $env:Path = "$dllDir;$env:Path"
+
+          if ("${{ matrix.execution }}" -eq "execute") {
+            zig build test `
+              -Dtarget=${{ matrix.target }} `
+              -Dlinkage=dynamic `
+              -Dsymcrypt_libraries="$importLib"
+            if ($LASTEXITCODE -ne 0) {
+              throw "dynamic Windows tests failed with exit code $LASTEXITCODE"
+            }
+            zig build test `
+              -Dtarget=${{ matrix.target }} `
+              -Dlinkage=static `
+              -Dsymcrypt_libraries="$staticLib"
+            if ($LASTEXITCODE -ne 0) {
+              throw "static Windows tests failed with exit code $LASTEXITCODE"
+            }
+          } else {
+            zig build test-compile `
+              -Dtarget=${{ matrix.target }} `
+              -Dlinkage=dynamic `
+              -Dsymcrypt_libraries="$importLib"
+            if ($LASTEXITCODE -ne 0) {
+              throw "dynamic Windows compile-link failed with exit code $LASTEXITCODE"
+            }
+            zig build test-compile `
+              -Dtarget=${{ matrix.target }} `
+              -Dlinkage=static `
+              -Dsymcrypt_libraries="$staticLib"
+            if ($LASTEXITCODE -ne 0) {
+              throw "static Windows compile-link failed with exit code $LASTEXITCODE"
+            }
+          }

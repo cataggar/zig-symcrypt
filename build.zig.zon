@@ -1,0 +1,19 @@
+.{
+    .name = .zig_symcrypt,
+    .version = "0.1.0",
+    .fingerprint = 0xd3777360e93a8c40,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+        "NOTICE.md",
+        "README.md",
+        "examples",
+        "src",
+        "test",
+        "tools",
+        "vendor",
+    },
+}

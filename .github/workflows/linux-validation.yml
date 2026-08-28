@@ -1,0 +1,107 @@
+name: Linux validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: ${{ matrix.target }} (dynamic + static execute)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-linux-gnu
+            arch: x86_64
+            runner: ubuntu-24.04
+            run_repository_gates: true
+          - target: aarch64-linux-gnu
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+            run_repository_gates: false
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          repository: microsoft/SymCrypt
+          ref: 286762b7730e2b780678f5ab11fef2b1bad639e0
+          path: .symcrypt-ci-source
+          fetch-depth: 1
+          fetch-tags: true
+          persist-credentials: false
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.16.0
+      - name: Verify native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tool in cmake ninja python3 git readelf; do
+            command -v "$tool" >/dev/null || {
+              echo "required build tool is unavailable: $tool" >&2
+              exit 1
+            }
+          done
+      - name: Build pinned native SymCrypt fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/build-linux-fixtures.sh \
+            "$GITHUB_WORKSPACE/.symcrypt-ci-source" \
+            "$GITHUB_WORKSPACE/.symcrypt-ci/${{ matrix.arch }}" \
+            "${{ matrix.arch }}"
+      - name: Run dynamic build and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$GITHUB_WORKSPACE/.symcrypt-ci/${{ matrix.arch }}"
+          shared="$fixture/module/generic/libsymcrypt.so"
+          export LD_LIBRARY_PATH="$(dirname "$shared")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          zig build example \
+            -Dtarget=${{ matrix.target }} \
+            -Dlinkage=dynamic \
+            -Dsymcrypt_libraries="$shared"
+          zig build test \
+            -Dtarget=${{ matrix.target }} \
+            -Dlinkage=dynamic \
+            -Dsymcrypt_libraries="$shared" \
+            --summary all
+      - name: Run static build and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$GITHUB_WORKSPACE/.symcrypt-ci/${{ matrix.arch }}"
+          zig build example \
+            -Dtarget=${{ matrix.target }} \
+            -Dlinkage=static \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_posixusermode.a" \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_common.a" \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_mlkem.a"
+          zig build test \
+            -Dtarget=${{ matrix.target }} \
+            -Dlinkage=static \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_posixusermode.a" \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_common.a" \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_mlkem.a" \
+            --summary all
+      - name: Run ABI, package, and diagnostic gates
+        if: matrix.run_repository_gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          zig build abi-local -Dheaders_only=true --summary all
+          test/build_diagnostics.sh
+          tools/check-package.sh
