@@ -1,0 +1,7 @@
+/.tools/
+/.symcrypt-build/
+/.symcrypt-zig-build/
+/.zig-cache/
+/.zig-negative-fixtures/
+/.zig-package-check/
+/zig-out/
