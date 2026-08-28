@@ -138,10 +138,26 @@ jobs:
             }
             zig build test `
               -Dtarget=${{ matrix.target }} `
+              -Dlinkage=dynamic `
+              -Dlegacy=true `
+              -Dsymcrypt_libraries="$importLib"
+            if ($LASTEXITCODE -ne 0) {
+              throw "legacy dynamic Windows tests failed with exit code $LASTEXITCODE"
+            }
+            zig build test `
+              -Dtarget=${{ matrix.target }} `
               -Dlinkage=static `
               -Dsymcrypt_libraries="$staticLib"
             if ($LASTEXITCODE -ne 0) {
               throw "static Windows tests failed with exit code $LASTEXITCODE"
+            }
+            zig build test `
+              -Dtarget=${{ matrix.target }} `
+              -Dlinkage=static `
+              -Dlegacy=true `
+              -Dsymcrypt_libraries="$staticLib"
+            if ($LASTEXITCODE -ne 0) {
+              throw "legacy static Windows tests failed with exit code $LASTEXITCODE"
             }
           } else {
             zig build test-compile `
@@ -153,9 +169,25 @@ jobs:
             }
             zig build test-compile `
               -Dtarget=${{ matrix.target }} `
+              -Dlinkage=dynamic `
+              -Dlegacy=true `
+              -Dsymcrypt_libraries="$importLib"
+            if ($LASTEXITCODE -ne 0) {
+              throw "legacy dynamic Windows compile-link failed with exit code $LASTEXITCODE"
+            }
+            zig build test-compile `
+              -Dtarget=${{ matrix.target }} `
               -Dlinkage=static `
               -Dsymcrypt_libraries="$staticLib"
             if ($LASTEXITCODE -ne 0) {
               throw "static Windows compile-link failed with exit code $LASTEXITCODE"
+            }
+            zig build test-compile `
+              -Dtarget=${{ matrix.target }} `
+              -Dlinkage=static `
+              -Dlegacy=true `
+              -Dsymcrypt_libraries="$staticLib"
+            if ($LASTEXITCODE -ne 0) {
+              throw "legacy static Windows compile-link failed with exit code $LASTEXITCODE"
             }
           }

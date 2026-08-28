@@ -33,6 +33,11 @@ pub fn build(b: *std.Build) void {
         "Additional target SDK/CRT include directories; repeat for cross-toolchains",
     ) orelse &.{};
     const checked = b.option(bool, "symcrypt_checked", "Match a checked/DBG SymCrypt binary") orelse false;
+    const legacy = b.option(
+        bool,
+        "legacy",
+        "Expose legacy MD5 and SHA-1 APIs for compatibility/integrity-only use",
+    ) orelse false;
     const headers_only = b.option(
         bool,
         "headers_only",
@@ -42,7 +47,7 @@ pub fn build(b: *std.Build) void {
     const target_ok = validateTarget(b, target, system_include_dirs);
     const libraries_ok = if (headers_only) true else validateLibraries(b, target, linkage, libraries);
 
-    const options = makeOptions(b, linkage, include_dir, checked, false);
+    const options = makeOptions(b, linkage, include_dir, checked, false, legacy);
     const symcrypt = b.addModule("symcrypt", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -59,12 +64,12 @@ pub fn build(b: *std.Build) void {
         "abi-local",
         "Compile pinned header and ABI checks for targets available from this host/toolchain",
     );
-    addAbiMatrix(b, abi_local_step, include_dir, system_include_dirs, .local_available);
+    addAbiMatrix(b, abi_local_step, include_dir, system_include_dirs, legacy, .local_available);
     const abi_step = b.step(
         "abi",
         "Compile pinned header and ABI checks for all supported targets (Windows SDK required)",
     );
-    addAbiMatrix(b, abi_step, include_dir, system_include_dirs, .full);
+    addAbiMatrix(b, abi_step, include_dir, system_include_dirs, legacy, .full);
 
     if (!headers_only and libraries.len == 0) {
         const fail = b.addFail(
@@ -98,6 +103,7 @@ pub fn build(b: *std.Build) void {
         include_dir,
         system_include_dirs,
         checked,
+        legacy,
         test_step,
         test_compile_step,
     );
@@ -124,12 +130,14 @@ fn makeOptions(
     include_dir: std.Build.LazyPath,
     checked: bool,
     init_test_hooks: bool,
+    legacy: bool,
 ) *std.Build.Step.Options {
     const options = b.addOptions();
     options.addOption([]const u8, "linkage", @tagName(linkage));
     options.addOption([]const u8, "include_dir", include_dir.getDisplayName());
     options.addOption(bool, "checked", checked);
     options.addOption(bool, "init_test_hooks", init_test_hooks);
+    options.addOption(bool, "legacy", legacy);
     return options;
 }
 
@@ -154,6 +162,13 @@ fn configureNative(
     libraries: []const std.Build.LazyPath,
 ) void {
     for (libraries) |library| module.addObjectFile(library);
+
+    if (target.result.os.tag == .windows and linkage == .dynamic) {
+        module.addCSourceFile(.{
+            .file = b.path("src/algorithm_accessors.c"),
+            .flags = &.{"-std=c11"},
+        });
+    }
 
     if (linkage == .static) {
         module.addCSourceFile(.{ .file = b.path("src/static_environment.c"), .flags = &.{"-std=c11"} });
@@ -261,6 +276,7 @@ fn addAbiMatrix(
     step: *std.Build.Step,
     include_dir: std.Build.LazyPath,
     system_include_dirs: []const std.Build.LazyPath,
+    legacy: bool,
     matrix: AbiMatrix,
 ) void {
     const windows_available =
@@ -282,7 +298,7 @@ fn addAbiMatrix(
         if (query.os_tag == .windows and !windows_available) continue;
         inline for (.{ false, true }) |checked| {
             const target = b.resolveTargetQuery(query);
-            const options = makeOptions(b, .dynamic, include_dir, checked, false);
+            const options = makeOptions(b, .dynamic, include_dir, checked, false, legacy);
             const module = b.createModule(.{
                 .root_source_file = b.path("src/root.zig"),
                 .target = target,
@@ -312,6 +328,7 @@ fn addNativeTests(
     include_dir: std.Build.LazyPath,
     system_include_dirs: []const std.Build.LazyPath,
     checked: bool,
+    legacy: bool,
     test_step: *std.Build.Step,
     test_compile_step: *std.Build.Step,
 ) void {
@@ -330,7 +347,7 @@ fn addNativeTests(
     test_compile_step.dependOn(&tests.step);
     test_step.dependOn(&run_tests.step);
 
-    const concurrency_options = makeOptions(b, linkage, include_dir, checked, true);
+    const concurrency_options = makeOptions(b, linkage, include_dir, checked, true, legacy);
     const concurrency_mod = b.createModule(.{
         .root_source_file = b.path("src/init_concurrency_test.zig"),
         .target = target,
@@ -353,7 +370,7 @@ fn addNativeTests(
     test_step.dependOn(&run_concurrency.step);
 
     if (linkage == .dynamic) {
-        const mismatch_options = makeOptions(b, .dynamic, include_dir, checked, false);
+        const mismatch_options = makeOptions(b, .dynamic, include_dir, checked, false, legacy);
         const mismatch_mod = b.createModule(.{
             .root_source_file = b.path("src/mismatch_test.zig"),
             .target = target,

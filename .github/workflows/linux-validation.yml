@@ -79,6 +79,12 @@ jobs:
             -Dlinkage=dynamic \
             -Dsymcrypt_libraries="$shared" \
             --summary all
+          zig build test \
+            -Dtarget=${{ matrix.target }} \
+            -Dlinkage=dynamic \
+            -Dlegacy=true \
+            -Dsymcrypt_libraries="$shared" \
+            --summary all
       - name: Run static build and tests
         shell: bash
         run: |
@@ -93,6 +99,14 @@ jobs:
           zig build test \
             -Dtarget=${{ matrix.target }} \
             -Dlinkage=static \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_posixusermode.a" \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_common.a" \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_mlkem.a" \
+            --summary all
+          zig build test \
+            -Dtarget=${{ matrix.target }} \
+            -Dlinkage=static \
+            -Dlegacy=true \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_posixusermode.a" \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_common.a" \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_mlkem.a" \

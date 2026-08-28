@@ -37,6 +37,9 @@ Options:
 - `symcrypt_system_include_dirs`: optional ordered SDK/CRT include paths for
   explicit cross-toolchains (Windows cross-compilation requires these).
 - `symcrypt_checked`: define `DBG=1`; this must match the supplied binary.
+- `legacy`: expose MD5 and SHA-1 hash, HMAC, and HKDF algorithm tags/types.
+  It defaults to `false`, is intended only for compatibility or integrity-only
+  consumers, and does not imply FIPS approval.
 - `headers_only`: package-maintainer ABI compilation without native binaries.
 
 Maintainer validation distinguishes checks available from the current host from
@@ -81,10 +84,82 @@ Maintainers can build native Linux fixtures with
 fails unless the native host matches the requested architecture and the source,
 tag, version, and emitted ELF artifacts match the 103.13.0 pin.
 
-## API and initialization
+## Cryptographic primitives
 
 ```zig
+const std = @import("std");
 const symcrypt = @import("symcrypt");
+
+const allocator = std.heap.page_allocator;
+const digest = try symcrypt.hash.digest(.sha256, "message");
+
+const hash = try symcrypt.hash.Sha256.create(allocator);
+defer hash.deinit();
+try hash.update("part one");
+const checkpoint = try hash.snapshot(); // source remains usable
+const independent = try hash.clone(allocator);
+defer independent.deinit();
+try hash.update("part two");
+const final_digest = try hash.final(); // hash state is reset and reusable
+
+const mac = try symcrypt.hmac.mac(.sha3_256, "key", "message");
+const hmac = try symcrypt.hmac.Sha256.create(allocator, "key");
+defer hmac.deinit();
+try hmac.update("message");
+const tag = try hmac.final(); // call reset before another computation
+try hmac.reset();
+
+var derived: [42]u8 = undefined;
+try symcrypt.hkdf.derive(.sha256, "ikm", "salt", "context", &derived);
+
+var nonce: [32]u8 = undefined;
+try symcrypt.random.fill(&nonce);
+
+_ = .{ digest, checkpoint, final_digest, mac, tag };
+```
+
+Supported default hash families are SHA-256, SHA-384, SHA-512, SHA3-224,
+SHA3-256, SHA3-384, and SHA3-512. Pinned SymCrypt 103.13.0 publicly exposes
+one-shot/incremental HMAC and HKDF for all of those families, so the same matrix
+is available in `symcrypt.hmac` and `symcrypt.hkdf`. `-Dlegacy=true` additionally
+adds MD5 and SHA-1 declarations and enum tags; without it those names do not
+exist in the public surface. Algorithms outside this matrix are not wrapped.
+
+Incremental contexts are opaque allocator-owned handles whose SymCrypt objects
+are allocated directly at their final stable address. Copying a handle only
+creates an alias; `clone` is the sole supported independent copy operation.
+Call `deinit` exactly once. It is deliberately not idempotent, and the handle
+and all aliases are invalid afterward. Complete hash/HMAC implementation
+objects and temporary copied/expanded states are wiped with `SymCryptWipe`.
+Caller-owned digest, MAC, HKDF, and random output buffers remain the caller's
+responsibility.
+
+HMAC rejects update/final/snapshot/clone after finalization with
+`error.InvalidState`; `reset` securely rebinds the retained expanded key.
+Hash `final` follows SymCrypt's reset-on-result behavior. `digestInto` and
+`macInto` require exact output sizes. HKDF rejects output longer than
+`255 * HashLen` before FFI and accepts zero output. Non-empty HKDF `info` and
+output slices must not overlap; full or partial overlap returns
+`error.OverlappingBuffers` because SymCrypt rereads `info` between output
+blocks. Every HKDF error securely zeroes the entire output with an
+initialization-independent optimizer-resistant wipe, including validation,
+overlap, initialization/version mismatch, and SymCrypt errors. No SymCrypt
+function is called after initialization fails.
+Empty optional HMAC keys and HKDF salt/info are passed as null only where the
+pinned API explicitly permits it.
+
+`symcrypt.Error` includes every public 103.13.0 `SYMCRYPT_ERROR`, initialization
+failures, `InvalidState`, `OverlappingBuffers`, and `UnknownSymCryptError`.
+`classifyCode(raw_u32)`
+returns `Status`, preserving an unfamiliar raw value in `.unknown_code` for
+forward-compatible diagnosis without constructing or casting to a C enum.
+
+## Initialization
+
+Every primitive initializes automatically. Explicit initialization remains
+available:
+
+```zig
 try symcrypt.init();
 ```
 
@@ -97,11 +172,15 @@ other nonzero dynamic results become
 `error.SymCryptInitializationFailed`. A static archive/header mismatch remains
 an unrecoverable upstream fatal condition.
 
-Static callbacks use OS entropy (`getrandom` or `BCryptGenRandom`), 32-byte
+Dynamic random generation uses exported `SymCryptRandom`, whose module failure
+contract is fatal rather than recoverable. Static random generation routes
+through the package callback and maps its `SYMCRYPT_ERROR`. Static callbacks
+use OS entropy (`getrandom` or `BCryptGenRandom`), 32-byte
 aligned allocation, and native mutexes. Static builds are not claimed to be
 FIPS validated. A successful dynamic handshake proves API/minor compatibility,
 not exact patch identity or validation status. Initialize before any operation;
-future state wrappers must not permit copying or moving SymCrypt state.
+the wrappers never copy or move SymCrypt state except through its state-copy
+APIs.
 
 See the generic `examples/initialize.zig`, linkage-specific
 `initialize_dynamic.zig`/`initialize_static.zig`, and
