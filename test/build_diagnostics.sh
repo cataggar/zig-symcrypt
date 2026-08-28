@@ -35,6 +35,10 @@ expect_failure dynamic-archive "expected .so or versioned .so.N" \
     zig build abi-local -Dsymcrypt_libraries=fake.a
 expect_failure windows-dll "pass the import .lib; the .dll is a runtime artifact" \
     zig build abi-local -Dtarget=x86_64-windows-msvc -Dsymcrypt_libraries=symcrypt.dll
+expect_failure mlkem-gate "ML-KEM-768 and RFC 10024" \
+    zig build abi-local -Dheaders_only=true -Denable_mlkem=true
+expect_failure tls-hybrid-gate "ML-KEM-768 and RFC 10024" \
+    zig build abi-local -Dheaders_only=true -Denable_tls_x25519_mlkem768=true
 
 cp -R vendor/symcrypt/include "$scratch/missing-header"
 rm "$scratch/missing-header/symcrypt_no_sal.h"

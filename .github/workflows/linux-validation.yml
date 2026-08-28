@@ -73,16 +73,20 @@ jobs:
           zig build example \
             -Dtarget=${{ matrix.target }} \
             -Dlinkage=dynamic \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
             -Dsymcrypt_libraries="$shared"
           zig build test \
             -Dtarget=${{ matrix.target }} \
             -Dlinkage=dynamic \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
             -Dsymcrypt_libraries="$shared" \
             --summary all
           zig build test \
             -Dtarget=${{ matrix.target }} \
             -Dlinkage=dynamic \
             -Dlegacy=true \
+            -Denable_legacy_rsa_pkcs1_encryption=true \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
             -Dsymcrypt_libraries="$shared" \
             --summary all
       - name: Run static build and tests
@@ -93,12 +97,14 @@ jobs:
           zig build example \
             -Dtarget=${{ matrix.target }} \
             -Dlinkage=static \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_posixusermode.a" \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_common.a" \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_mlkem.a"
           zig build test \
             -Dtarget=${{ matrix.target }} \
             -Dlinkage=static \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_posixusermode.a" \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_common.a" \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_mlkem.a" \
@@ -107,6 +113,8 @@ jobs:
             -Dtarget=${{ matrix.target }} \
             -Dlinkage=static \
             -Dlegacy=true \
+            -Denable_legacy_rsa_pkcs1_encryption=true \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_posixusermode.a" \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_common.a" \
             -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_mlkem.a" \

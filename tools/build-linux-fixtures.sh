@@ -89,7 +89,8 @@ shared=$output_dir/module/generic/libsymcrypt.so
 static_environment=$output_dir/lib/libsymcrypt_posixusermode.a
 static_common=$output_dir/lib/libsymcrypt_common.a
 static_mlkem=$output_dir/lib/libsymcrypt_mlkem.a
-for artifact in "$shared" "$static_environment" "$static_common" "$static_mlkem"; do
+static_plus=$output_dir/lib/libsymcrypt_plus.a
+for artifact in "$shared" "$static_plus" "$static_environment" "$static_common" "$static_mlkem"; do
     [ -f "$artifact" ] || {
         echo "missing expected $requested_arch fixture artifact: $artifact" >&2
         exit 1
@@ -108,6 +109,7 @@ echo "architecture: $requested_arch"
 echo "source: $expected_tag ($expected)"
 echo "shared: $shared"
 echo "static archives (preserve this order):"
+echo "  $static_plus"
 echo "  $static_environment"
 echo "  $static_common"
 echo "  $static_mlkem"

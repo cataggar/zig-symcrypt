@@ -30,6 +30,7 @@ pub const hmac = if (options.legacy) @import("hmac_legacy.zig") else @import("hm
 pub const hkdf = @import("hkdf.zig");
 pub const aead = @import("aead.zig");
 pub const cipher = @import("cipher.zig");
+pub const asymmetric = @import("asymmetric.zig");
 pub const testing = if (@import("builtin").is_test) struct {
     pub fn failNextHmacCreateAfterAllocation() void {
         @import("hmac_impl.zig").testFailNextCreateAfterAllocation();
@@ -74,4 +75,9 @@ comptime {
 
 test {
     std.testing.refAllDecls(@This());
+    std.testing.refAllDecls(asymmetric);
+    std.testing.refAllDecls(asymmetric.ecdsa_der);
+    std.testing.refAllDecls(asymmetric.ecc);
+    std.testing.refAllDecls(asymmetric.x25519);
+    std.testing.refAllDecls(asymmetric.rsa);
 }
