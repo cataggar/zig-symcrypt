@@ -1,30 +1,113 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ne 2 ]; then
-    echo "usage: $0 /path/to/SymCrypt /path/to/output" >&2
+if [ "$#" -ne 3 ]; then
+    echo "usage: $0 /path/to/SymCrypt /path/to/output x86_64|aarch64" >&2
     exit 2
 fi
 
 source_dir=$1
 output_dir=$2
+requested_arch=$3
 expected=286762b7730e2b780678f5ab11fef2b1bad639e0
-actual=$(git -C "$source_dir" rev-parse HEAD)
-[ "$actual" = "$expected" ] || {
-    echo "expected SymCrypt v103.13.0 commit $expected, found $actual" >&2
+expected_tag=v103.13.0
+
+case "$requested_arch" in
+    x86_64)
+        cmake_arch=AMD64
+        elf_machine="Advanced Micro Devices X86-64"
+        ;;
+    aarch64)
+        cmake_arch=ARM64
+        elf_machine=AArch64
+        ;;
+    *)
+        echo "unsupported Linux fixture architecture '$requested_arch'; expected x86_64 or aarch64" >&2
+        exit 2
+        ;;
+esac
+
+case "$(uname -m)" in
+    x86_64|amd64) host_arch=x86_64 ;;
+    aarch64|arm64) host_arch=aarch64 ;;
+    *)
+        echo "unsupported native Linux build host architecture '$(uname -m)'" >&2
+        exit 1
+        ;;
+esac
+[ "$host_arch" = "$requested_arch" ] || {
+    echo "refusing to build $requested_arch fixtures on native host $host_arch" >&2
     exit 1
 }
 
+origin=$(git -C "$source_dir" remote get-url origin)
+case "$origin" in
+    https://github.com/microsoft/SymCrypt|https://github.com/microsoft/SymCrypt.git|git@github.com:microsoft/SymCrypt.git) ;;
+    *)
+        echo "expected canonical Microsoft SymCrypt origin, found '$origin'" >&2
+        exit 1
+        ;;
+esac
+
+actual=$(git -C "$source_dir" rev-parse HEAD^{commit})
+[ "$actual" = "$expected" ] || {
+    echo "expected SymCrypt $expected_tag commit $expected, found $actual" >&2
+    exit 1
+}
+tag_commit=$(git -C "$source_dir" rev-parse "refs/tags/$expected_tag^{commit}") || {
+    echo "required provenance tag $expected_tag is unavailable" >&2
+    exit 1
+}
+[ "$tag_commit" = "$expected" ] || {
+    echo "expected $expected_tag to resolve to $expected, found $tag_commit" >&2
+    exit 1
+}
+[ -z "$(git -C "$source_dir" status --porcelain --untracked-files=no)" ] || {
+    echo "SymCrypt source has tracked modifications before fixture build" >&2
+    exit 1
+}
+python3 - "$source_dir/version.json" <<'PY'
+import json
+import pathlib
+import sys
+
+version = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if version != {"major": 103, "minor": 13, "patch": 0}:
+    raise SystemExit(f"expected SymCrypt version 103.13.0, found {version!r}")
+PY
+
 cmake -S "$source_dir" -B "$output_dir" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
+    -DSYMCRYPT_TARGET_ARCH="$cmake_arch" \
     -DSYMCRYPT_UNIT_TESTS=OFF \
     -DSYMCRYPT_FIPS_BUILD=OFF \
     -DSYMCRYPT_FIPS_POSTPROCESS=OFF \
     -DSYMCRYPT_STRIP_BINARY=OFF
 cmake --build "$output_dir" --parallel
 
-echo "shared: $output_dir/module/generic/libsymcrypt.so"
+shared=$output_dir/module/generic/libsymcrypt.so
+static_environment=$output_dir/lib/libsymcrypt_posixusermode.a
+static_common=$output_dir/lib/libsymcrypt_common.a
+static_mlkem=$output_dir/lib/libsymcrypt_mlkem.a
+for artifact in "$shared" "$static_environment" "$static_common" "$static_mlkem"; do
+    [ -f "$artifact" ] || {
+        echo "missing expected $requested_arch fixture artifact: $artifact" >&2
+        exit 1
+    }
+    readelf -h "$artifact" 2>/dev/null | grep -F "Machine:" | grep -F "$elf_machine" >/dev/null || {
+        echo "fixture artifact is not $requested_arch ELF: $artifact" >&2
+        exit 1
+    }
+done
+readelf -d "$shared" | grep -F '(SONAME)' | grep -F 'libsymcrypt.so.103' >/dev/null || {
+    echo "shared fixture has an unexpected SONAME: $shared" >&2
+    exit 1
+}
+
+echo "architecture: $requested_arch"
+echo "source: $expected_tag ($expected)"
+echo "shared: $shared"
 echo "static archives (preserve this order):"
-echo "  $output_dir/lib/libsymcrypt_posixusermode.a"
-echo "  $output_dir/lib/libsymcrypt_common.a"
-echo "  $output_dir/lib/libsymcrypt_mlkem.a"
+echo "  $static_environment"
+echo "  $static_common"
+echo "  $static_mlkem"

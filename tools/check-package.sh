@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 if grep -R -n -E '(\.\./SymCrypt|/d/SymCrypt|/d/rust-symcrypt)' \
     --exclude=check-package.sh \
     --exclude-dir=.git --exclude-dir=.zig-cache --exclude-dir=.tools \
-    --exclude-dir=.symcrypt-build --exclude-dir=.symcrypt-zig-build .; then
+    --exclude-dir=.symcrypt-build --exclude-dir=.symcrypt-zig-build \
+    --exclude-dir=.symcrypt-ci --exclude-dir=.symcrypt-ci-source .; then
     echo "package contains a developer-local reference path" >&2
     exit 1
 fi

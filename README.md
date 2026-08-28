@@ -8,8 +8,8 @@ shipping translated bindings, and never uses `dlopen` or `LoadLibrary`.
 
 | Target | Status |
 |---|---|
-| `x86_64-linux-gnu` | compile and native execution supported |
-| `aarch64-linux-gnu` | compile supported; execute on native/QEMU fixture |
+| `x86_64-linux-gnu` | compile, dynamic/static link, and native execution validated in CI |
+| `aarch64-linux-gnu` | compile, dynamic/static link, and native execution validated in CI |
 | `x86_64-windows-msvc` | compile supported; execute on Windows fixture |
 | `aarch64-windows-msvc` | compile supported; native ARM64 execution is a release gate |
 
@@ -52,8 +52,10 @@ SDK or explicit `symcrypt_system_include_dirs` are available. `abi` is the full
 release gate and fails rather than skipping Windows when the SDK inputs are
 absent. GitHub Actions runs that full ABI gate on Windows, executes dynamic and
 static tests on Windows x86_64, and compile-links both test sets for Windows
-ARM64. Native Windows ARM64 execution remains a release gate on an ARM64
-runner.
+ARM64. Linux Actions jobs build the exact pinned upstream commit and execute the
+complete dynamic and static test paths, including isolated concurrent first
+initialization, on native x86_64 and ARM64 runners. Native Windows ARM64
+execution remains a release gate on an ARM64 runner.
 
 For command-line use, repeat the path option to preserve archive order:
 
@@ -73,6 +75,11 @@ MSVC/SDK discovery. Linux dynamic deployments must make the matching SONAME
 reachable through normal loader paths or an application-owned rpath. Put
 `symcrypt.dll` beside the Windows executable or on its documented DLL search
 path. This package does not copy binaries or mutate loader configuration.
+
+Maintainers can build native Linux fixtures with
+`tools/build-linux-fixtures.sh SOURCE OUTPUT x86_64` or `aarch64`. The script
+fails unless the native host matches the requested architecture and the source,
+tag, version, and emitted ELF artifacts match the 103.13.0 pin.
 
 ## API and initialization
 
