@@ -1,7 +1,13 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const options = @import("symcrypt_options");
 
 pub const raw = @cImport({
+    if (builtin.target.os.tag == .windows) {
+        // translate-c cannot represent MSVC's i64/ui64 literal suffixes from intsafe.h.
+        @cUndef("_MSC_VER");
+        @cDefine("__GNUC__", "4");
+    }
     @cDefine("SYMCRYPT_ZIG_IMPORT", "1");
     @cInclude("stddef.h");
     @cInclude("symcrypt.h");

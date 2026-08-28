@@ -17,7 +17,7 @@ concurrency:
 jobs:
   abi:
     name: Full ABI matrix (Windows SDK)
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
@@ -27,7 +27,7 @@ jobs:
         shell: pwsh
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
-          $installation = & $vswhere -latest -products * `
+          $installation = & $vswhere -latest -version "[17.0,18.0)" -products * `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
               Microsoft.VisualStudio.Component.VC.Tools.ARM64 `
             -property installationPath
@@ -40,7 +40,7 @@ jobs:
 
   link:
     name: ${{ matrix.target }} (${{ matrix.execution }})
-    runs-on: windows-2025
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
@@ -69,7 +69,7 @@ jobs:
         shell: pwsh
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
-          $installation = & $vswhere -latest -products * `
+          $installation = & $vswhere -latest -version "[17.0,18.0)" -products * `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
               Microsoft.VisualStudio.Component.VC.Tools.ARM64 `
             -property installationPath
@@ -84,7 +84,8 @@ jobs:
             /m /t:Rebuild `
             /p:Platform=${{ matrix.platform }} `
             /p:Configuration=Release `
-            /p:SolutionDir="$solutionDir"
+            /p:SolutionDir="$solutionDir" `
+            /p:SpectreMitigation=false
 
           $base = Join-Path $env:GITHUB_WORKSPACE "SymCrypt/build/bin/${{ matrix.flavor }}"
           $dllDir = Join-Path $base "dll"
