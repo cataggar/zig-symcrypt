@@ -6,10 +6,9 @@ const c = @import("../c.zig").raw;
 extern fn SymCryptZigAesBlockCipher() c.PCSYMCRYPT_BLOCKCIPHER;
 
 pub fn aesBlockCipher() c.PCSYMCRYPT_BLOCKCIPHER {
-    if (builtin.target.os.tag == .windows and
+    return if (comptime builtin.target.os.tag == .windows and
         std.mem.eql(u8, options.linkage, "dynamic"))
-    {
-        return SymCryptZigAesBlockCipher();
-    }
-    return c.SymCryptAesBlockCipher;
+        SymCryptZigAesBlockCipher()
+    else
+        c.SymCryptAesBlockCipher;
 }
