@@ -6,6 +6,6 @@ comptime {
 }
 
 pub fn main() !void {
-    try symcrypt.init();
-    std.debug.print("dynamically linked SymCrypt is initialized\n", .{});
+    const digest = try symcrypt.hash.digest(.sha256, "abc");
+    std.debug.print("dynamic SymCrypt SHA-256(abc): {x}\n", .{digest});
 }

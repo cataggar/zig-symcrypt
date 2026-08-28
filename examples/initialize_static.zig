@@ -6,6 +6,9 @@ comptime {
 }
 
 pub fn main() !void {
-    try symcrypt.init();
-    std.debug.print("statically linked SymCrypt is initialized (not a FIPS claim)\n", .{});
+    const context = try symcrypt.hmac.Sha256.create(std.heap.page_allocator, "example key");
+    defer context.deinit();
+    try context.update("abc");
+    const result = try context.final();
+    std.debug.print("static SymCrypt HMAC-SHA-256: {x} (not a FIPS claim)\n", .{result});
 }
