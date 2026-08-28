@@ -16,6 +16,90 @@ fn expectHex(comptime expected: []const u8, actual: anytype) !void {
     try std.testing.expectEqualStrings(expected, &encoded);
 }
 
+const WipeCheckingAllocator = struct {
+    backing: std.mem.Allocator,
+    allocations: usize = 0,
+    frees: usize = 0,
+    last_free_len: usize = 0,
+    last_free_all_zero: bool = false,
+
+    fn init(backing: std.mem.Allocator) WipeCheckingAllocator {
+        return .{ .backing = backing };
+    }
+
+    fn allocator(self: *WipeCheckingAllocator) std.mem.Allocator {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .alloc = alloc,
+                .resize = resize,
+                .remap = remap,
+                .free = free,
+            },
+        };
+    }
+
+    fn alloc(
+        context: *anyopaque,
+        len: usize,
+        alignment: std.mem.Alignment,
+        return_address: usize,
+    ) ?[*]u8 {
+        const self: *WipeCheckingAllocator = @ptrCast(@alignCast(context));
+        const result = self.backing.rawAlloc(len, alignment, return_address) orelse return null;
+        self.allocations += 1;
+        return result;
+    }
+
+    fn resize(
+        context: *anyopaque,
+        memory: []u8,
+        alignment: std.mem.Alignment,
+        new_len: usize,
+        return_address: usize,
+    ) bool {
+        const self: *WipeCheckingAllocator = @ptrCast(@alignCast(context));
+        return self.backing.rawResize(memory, alignment, new_len, return_address);
+    }
+
+    fn remap(
+        context: *anyopaque,
+        memory: []u8,
+        alignment: std.mem.Alignment,
+        new_len: usize,
+        return_address: usize,
+    ) ?[*]u8 {
+        const self: *WipeCheckingAllocator = @ptrCast(@alignCast(context));
+        return self.backing.rawRemap(memory, alignment, new_len, return_address);
+    }
+
+    fn free(
+        context: *anyopaque,
+        memory: []u8,
+        alignment: std.mem.Alignment,
+        return_address: usize,
+    ) void {
+        const self: *WipeCheckingAllocator = @ptrCast(@alignCast(context));
+        self.last_free_len = memory.len;
+        self.last_free_all_zero = true;
+        for (memory) |byte| {
+            if (byte != 0) {
+                self.last_free_all_zero = false;
+                break;
+            }
+        }
+        self.frees += 1;
+        self.backing.rawFree(memory, alignment, return_address);
+    }
+
+    fn expectSingleZeroedFree(self: *const WipeCheckingAllocator, expected_len: usize) !void {
+        try std.testing.expectEqual(@as(usize, 1), self.allocations);
+        try std.testing.expectEqual(@as(usize, 1), self.frees);
+        try std.testing.expectEqual(expected_len, self.last_free_len);
+        try std.testing.expect(self.last_free_all_zero);
+    }
+};
+
 fn hashBlockLength(comptime algorithm: symcrypt.hash.Algorithm) usize {
     return if (symcrypt.legacy_enabled)
         switch (algorithm) {
@@ -297,32 +381,135 @@ test "HKDF vectors limits empty inputs and failure wiping" {
     const too_long = try std.testing.allocator.alloc(u8, max + 1);
     defer std.testing.allocator.free(too_long);
     @memset(too_long, 0xa5);
+    try std.testing.expectError(
+        error.OverlappingBuffers,
+        symcrypt.hkdf.derive(.sha256, "", "", too_long[0..1], too_long),
+    );
+    for (too_long) |byte| try std.testing.expectEqual(@as(u8, 0), byte);
+    @memset(too_long, 0xa5);
     try std.testing.expectError(error.WrongDataSize, symcrypt.hkdf.derive(.sha256, "", "", "", too_long));
     for (too_long) |byte| try std.testing.expectEqual(@as(u8, 0), byte);
+
+    var full_overlap = [_]u8{0x3c} ** 65;
+    try std.testing.expectError(
+        error.OverlappingBuffers,
+        symcrypt.hkdf.derive(
+            .sha256,
+            "ikm",
+            "salt",
+            full_overlap[0..],
+            full_overlap[0..],
+        ),
+    );
+    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** full_overlap.len), &full_overlap);
+
+    var partial_storage = [_]u8{0x5a} ** 96;
+    try std.testing.expectError(
+        error.OverlappingBuffers,
+        symcrypt.hkdf.derive(
+            .sha256,
+            "ikm",
+            "salt",
+            partial_storage[0..48],
+            partial_storage[31..96],
+        ),
+    );
+    try std.testing.expectEqualSlices(
+        u8,
+        &([_]u8{0} ** 65),
+        partial_storage[31..96],
+    );
+
+    var reverse_partial_storage = [_]u8{0xc3} ** 96;
+    try std.testing.expectError(
+        error.OverlappingBuffers,
+        symcrypt.hkdf.derive(
+            .sha256,
+            "ikm",
+            "salt",
+            reverse_partial_storage[48..96],
+            reverse_partial_storage[0..65],
+        ),
+    );
+    try std.testing.expectEqualSlices(
+        u8,
+        &([_]u8{0} ** 65),
+        reverse_partial_storage[0..65],
+    );
+
+    const adjacent_info = [_]u8{0x7b} ** 32;
+    var expected_adjacent: [65]u8 = undefined;
+    try symcrypt.hkdf.derive(.sha256, "ikm", "salt", &adjacent_info, &expected_adjacent);
+    var adjacent_storage: [97]u8 = undefined;
+    @memcpy(adjacent_storage[0..32], &adjacent_info);
+    try symcrypt.hkdf.derive(
+        .sha256,
+        "ikm",
+        "salt",
+        adjacent_storage[0..32],
+        adjacent_storage[32..97],
+    );
+    try std.testing.expectEqualSlices(u8, &expected_adjacent, adjacent_storage[32..97]);
+
+    var separate_output: [65]u8 = undefined;
+    try symcrypt.hkdf.derive(.sha256, "ikm", "salt", &adjacent_info, &separate_output);
+    try std.testing.expectEqualSlices(u8, &expected_adjacent, &separate_output);
 }
 
-test "allocation failure and deterministic full-object wiping" {
+test "allocation failures and exact full-allocation wiping before free" {
     var failing_hash = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     try std.testing.expectError(error.OutOfMemory, symcrypt.hash.Sha256.create(failing_hash.allocator()));
     var failing_hmac = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     try std.testing.expectError(error.OutOfMemory, symcrypt.hmac.Sha256.create(failing_hmac.allocator(), "key"));
 
-    const hash_context = try symcrypt.hash.Sha256.create(std.testing.allocator);
-    var failing_hash_clone = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
-    try std.testing.expectError(error.OutOfMemory, hash_context.clone(failing_hash_clone.allocator()));
-    hash_context.deinit();
-    try std.testing.expect(symcrypt.testing.lastWipeLength() >= @sizeOf(c.SYMCRYPT_SHA256_STATE));
+    const HashImpl = struct {
+        allocator: std.mem.Allocator,
+        state: c.SYMCRYPT_SHA256_STATE,
+    };
+    const HmacImpl = struct {
+        allocator: std.mem.Allocator,
+        key: c.SYMCRYPT_HMAC_SHA256_EXPANDED_KEY,
+        state: c.SYMCRYPT_HMAC_SHA256_STATE,
+        active: bool,
+    };
 
-    const hmac_context = try symcrypt.hmac.Sha256.create(std.testing.allocator, "secret");
-    const clone_source = try hmac_context.clone(std.testing.allocator);
-    defer clone_source.deinit();
-    var failing_clone = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
-    try std.testing.expectError(error.OutOfMemory, hmac_context.clone(failing_clone.allocator()));
+    var hash_create_allocator = WipeCheckingAllocator.init(std.testing.allocator);
+    const hash_context = try symcrypt.hash.Sha256.create(hash_create_allocator.allocator());
+    hash_context.deinit();
+    try hash_create_allocator.expectSingleZeroedFree(@sizeOf(HashImpl));
+
+    const hash_source = try symcrypt.hash.Sha256.create(std.testing.allocator);
+    defer hash_source.deinit();
+    var hash_clone_allocator = WipeCheckingAllocator.init(std.testing.allocator);
+    const hash_clone = try hash_source.clone(hash_clone_allocator.allocator());
+    hash_clone.deinit();
+    try hash_clone_allocator.expectSingleZeroedFree(@sizeOf(HashImpl));
+
+    var failing_hash_clone = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    try std.testing.expectError(error.OutOfMemory, hash_source.clone(failing_hash_clone.allocator()));
+
+    var hmac_create_allocator = WipeCheckingAllocator.init(std.testing.allocator);
+    const hmac_context = try symcrypt.hmac.Sha256.create(hmac_create_allocator.allocator(), "secret");
     hmac_context.deinit();
-    try std.testing.expect(
-        symcrypt.testing.lastWipeLength() >=
-            @sizeOf(c.SYMCRYPT_HMAC_SHA256_EXPANDED_KEY) + @sizeOf(c.SYMCRYPT_HMAC_SHA256_STATE),
+    try hmac_create_allocator.expectSingleZeroedFree(@sizeOf(HmacImpl));
+
+    const hmac_source = try symcrypt.hmac.Sha256.create(std.testing.allocator, "secret");
+    defer hmac_source.deinit();
+    var hmac_clone_allocator = WipeCheckingAllocator.init(std.testing.allocator);
+    const hmac_clone = try hmac_source.clone(hmac_clone_allocator.allocator());
+    hmac_clone.deinit();
+    try hmac_clone_allocator.expectSingleZeroedFree(@sizeOf(HmacImpl));
+
+    var failing_clone = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    try std.testing.expectError(error.OutOfMemory, hmac_source.clone(failing_clone.allocator()));
+
+    var post_allocation_failure_allocator = WipeCheckingAllocator.init(std.testing.allocator);
+    symcrypt.testing.failNextHmacCreateAfterAllocation();
+    try std.testing.expectError(
+        error.MemoryAllocationFailure,
+        symcrypt.hmac.Sha256.create(post_allocation_failure_allocator.allocator(), "secret"),
     );
+    try post_allocation_failure_allocator.expectSingleZeroedFree(@sizeOf(HmacImpl));
 }
 
 test "random zero length smoke and static callback routing" {

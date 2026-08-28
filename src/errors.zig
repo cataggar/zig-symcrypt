@@ -31,7 +31,10 @@ pub const SymCryptError = error{
     UnknownSymCryptError,
 };
 
-pub const Error = InitError || SymCryptError || error{InvalidState};
+pub const Error = InitError || SymCryptError || error{
+    InvalidState,
+    OverlappingBuffers,
+};
 
 pub const KnownError = enum {
     unused,

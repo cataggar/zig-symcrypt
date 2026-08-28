@@ -138,12 +138,19 @@ HMAC rejects update/final/snapshot/clone after finalization with
 `error.InvalidState`; `reset` securely rebinds the retained expanded key.
 Hash `final` follows SymCrypt's reset-on-result behavior. `digestInto` and
 `macInto` require exact output sizes. HKDF rejects output longer than
-`255 * HashLen` before FFI, wipes output on error, and accepts zero output.
+`255 * HashLen` before FFI and accepts zero output. Non-empty HKDF `info` and
+output slices must not overlap; full or partial overlap returns
+`error.OverlappingBuffers` because SymCrypt rereads `info` between output
+blocks. Every HKDF error securely zeroes the entire output with an
+initialization-independent optimizer-resistant wipe, including validation,
+overlap, initialization/version mismatch, and SymCrypt errors. No SymCrypt
+function is called after initialization fails.
 Empty optional HMAC keys and HKDF salt/info are passed as null only where the
 pinned API explicitly permits it.
 
 `symcrypt.Error` includes every public 103.13.0 `SYMCRYPT_ERROR`, initialization
-failures, `InvalidState`, and `UnknownSymCryptError`. `classifyCode(raw_u32)`
+failures, `InvalidState`, `OverlappingBuffers`, and `UnknownSymCryptError`.
+`classifyCode(raw_u32)`
 returns `Status`, preserving an unfamiliar raw value in `.unknown_code` for
 forward-compatible diagnosis without constructing or casting to a C enum.
 

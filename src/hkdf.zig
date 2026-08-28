@@ -9,7 +9,12 @@ const hmac = if (options.legacy) @import("hmac_legacy.zig") else @import("hmac.z
 
 const empty_input: u8 = 0;
 
-/// RFC 5869 HKDF into caller-owned output. On failure, all output bytes are wiped.
+/// RFC 5869 HKDF into caller-owned output.
+///
+/// `info` and `output` must not overlap unless either slice is empty. SymCrypt
+/// rereads `info` for every output block, so aliases are rejected with
+/// `error.OverlappingBuffers`. On every error, including initialization
+/// failure, all output bytes are securely zeroed without calling SymCrypt.
 pub fn derive(
     algorithm: hmac.Algorithm,
     ikm: []const u8,
@@ -17,16 +22,16 @@ pub fn derive(
     info: []const u8,
     output: []u8,
 ) errors.Error!void {
+    errdefer secure_memory.wipeIndependent(output);
+
+    if (slicesOverlap(info, output)) return error.OverlappingBuffers;
     const limit = std.math.mul(usize, 255, digestLength(algorithm)) catch
         return error.WrongDataSize;
-    if (output.len > limit) {
-        secure_memory.wipe(output);
-        return error.WrongDataSize;
-    }
+    if (output.len > limit) return error.WrongDataSize;
 
     try initialization.ensureInitialized();
     if (output.len == 0) return;
-    errors.check(c.SymCryptHkdf(
+    try errors.check(c.SymCryptHkdf(
         macAlgorithm(algorithm),
         requiredPtr(ikm),
         ikm.len,
@@ -36,10 +41,7 @@ pub fn derive(
         info.len,
         output.ptr,
         output.len,
-    )) catch |err| {
-        secure_memory.wipe(output);
-        return err;
-    };
+    ));
 }
 
 pub fn maxOutputLength(algorithm: hmac.Algorithm) usize {
@@ -112,4 +114,15 @@ fn optionalPtr(data: []const u8) [*c]const u8 {
 
 fn requiredPtr(data: []const u8) [*c]const u8 {
     return if (data.len == 0) @ptrCast(&empty_input) else @ptrCast(data.ptr);
+}
+
+fn slicesOverlap(a: []const u8, b: []u8) bool {
+    if (a.len == 0 or b.len == 0) return false;
+    return addressRangesOverlap(@intFromPtr(a.ptr), a.len, @intFromPtr(b.ptr), b.len);
+}
+
+fn addressRangesOverlap(a_start: usize, a_len: usize, b_start: usize, b_len: usize) bool {
+    std.debug.assert(a_len != 0 and b_len != 0);
+    if (a_start <= b_start) return b_start - a_start < a_len;
+    return a_start - b_start < b_len;
 }

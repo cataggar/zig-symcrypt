@@ -29,8 +29,8 @@ pub const hash = if (options.legacy) @import("hash_legacy.zig") else @import("ha
 pub const hmac = if (options.legacy) @import("hmac_legacy.zig") else @import("hmac.zig");
 pub const hkdf = @import("hkdf.zig");
 pub const testing = if (@import("builtin").is_test) struct {
-    pub fn lastWipeLength() usize {
-        return @import("internal/secure_memory.zig").testLastWipeLength();
+    pub fn failNextHmacCreateAfterAllocation() void {
+        @import("hmac_impl.zig").testFailNextCreateAfterAllocation();
     }
 } else struct {};
 

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const c = @import("c.zig").raw;
 const initialization = @import("init.zig");
 const errors = @import("errors.zig");
@@ -6,6 +7,29 @@ const state_memory = @import("internal/state.zig");
 const secure_memory = @import("internal/secure_memory.zig");
 
 const empty_input: u8 = 0;
+var test_fail_create_after_allocation = false;
+
+pub fn testFailNextCreateAfterAllocation() void {
+    if (!builtin.is_test) @compileError("HMAC test hooks are disabled");
+    std.debug.assert(!@atomicRmw(
+        bool,
+        &test_fail_create_after_allocation,
+        .Xchg,
+        true,
+        .acq_rel,
+    ));
+}
+
+fn testMaybeFailCreateAfterAllocation() errors.Error!void {
+    if (!builtin.is_test) return;
+    if (@atomicRmw(
+        bool,
+        &test_fail_create_after_allocation,
+        .Xchg,
+        false,
+        .acq_rel,
+    )) return error.MemoryAllocationFailure;
+}
 
 pub fn Api(comptime AlgorithmType: type) type {
     return struct {
@@ -69,6 +93,7 @@ pub fn Api(comptime AlgorithmType: type) type {
                     const implementation = try state_memory.allocate(Impl, allocator);
                     errdefer state_memory.destroy(Impl, allocator, implementation);
                     implementation.allocator = allocator;
+                    try testMaybeFailCreateAfterAllocation();
                     try errors.check(A.expandKey(&implementation.key, optionalPtr(key), key.len));
                     A.init(&implementation.state, &implementation.key);
                     implementation.active = true;
