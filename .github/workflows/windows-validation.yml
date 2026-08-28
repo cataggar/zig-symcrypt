@@ -25,7 +25,7 @@ jobs:
         include:
           - target: x86_64-windows-msvc
             arch: x86_64
-            runner: windows-2022
+            runner: windows-2025
           - target: aarch64-windows-msvc
             arch: aarch64
             runner: windows-11-vs2026-arm
@@ -85,11 +85,13 @@ jobs:
             -Dsymcrypt_libraries="$core" `
             --summary all
           if ($LASTEXITCODE -ne 0) { throw "dynamic ABI release gate failed" }
-          zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe `
-            -Dlinkage=dynamic -Dsymcrypt_provenance="$manifest" `
-            -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
-            --summary all
-          if ($LASTEXITCODE -ne 0) { throw "dynamic ReleaseSafe tests failed" }
+          foreach ($optimize in @("Debug", "ReleaseSafe")) {
+            zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
+              -Dlinkage=dynamic -Dsymcrypt_provenance="$manifest" `
+              -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
+              --summary all
+            if ($LASTEXITCODE -ne 0) { throw "dynamic $optimize tests failed" }
+          }
           if ("${{ matrix.arch }}" -eq "x86_64") {
             foreach ($optimize in @("Debug", "ReleaseSafe")) {
               zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
@@ -134,10 +136,12 @@ jobs:
             -Dsymcrypt_libraries="$core" `
             --summary all
           if ($LASTEXITCODE -ne 0) { throw "static ABI release gate failed" }
-          zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe `
-            -Dlinkage=static -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
-            --summary all
-          if ($LASTEXITCODE -ne 0) { throw "static ReleaseSafe tests failed" }
+          foreach ($optimize in @("Debug", "ReleaseSafe")) {
+            zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
+              -Dlinkage=static -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
+              --summary all
+            if ($LASTEXITCODE -ne 0) { throw "static $optimize tests failed" }
+          }
           if ("${{ matrix.arch }}" -eq "x86_64") {
             foreach ($optimize in @("Debug", "ReleaseSafe")) {
               zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `

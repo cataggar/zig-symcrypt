@@ -9,7 +9,13 @@ const state_memory = @import("../internal/state.zig");
 const asymmetric = @import("../asymmetric.zig");
 const hashes = @import("hash_support.zig");
 
-extern fn SymCryptZigTestConsumeDeferredAllocationFailure() c.BOOLEAN;
+const callback_testing = if (options.callback_fault_injection) struct {
+    extern fn SymCryptZigTestConsumeDeferredAllocationFailure() c.BOOLEAN;
+
+    fn consumeDeferredAllocationFailure() bool {
+        return SymCryptZigTestConsumeDeferredAllocationFailure() != 0;
+    }
+} else struct {};
 
 pub const Usage = struct {
     sign: bool = false,
@@ -116,8 +122,8 @@ pub const PrivateKey = opaque {
             if (public_exponent != null) 1 else 0,
             try requested_usage.flags(),
         );
-        if (comptime std.mem.eql(u8, options.linkage, "static")) {
-            if (SymCryptZigTestConsumeDeferredAllocationFailure() != 0)
+        if (comptime options.callback_fault_injection) {
+            if (callback_testing.consumeDeferredAllocationFailure())
                 return error.MemoryAllocationFailure;
         }
         try errors.check(result);

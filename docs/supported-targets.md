@@ -6,7 +6,7 @@ The release matrix is mandatory and fail-closed:
 |---|---|---|---|
 | `x86_64-linux-gnu` | Ubuntu 24.04 x86-64 | Debug/ReleaseSafe build and execute | Debug/ReleaseSafe build and execute |
 | `aarch64-linux-gnu` | Ubuntu 24.04 Arm64 | Debug/ReleaseSafe build and execute | Debug/ReleaseSafe build and execute |
-| `x86_64-windows-msvc` | Windows Server 2025 x86-64 | Debug/ReleaseSafe build and execute | Debug/ReleaseSafe build and execute |
+| `x86_64-windows-msvc` | `windows-2025` (Windows Server 2025 x86-64) | Debug/ReleaseSafe build and execute | Debug/ReleaseSafe build and execute |
 | `aarch64-windows-msvc` | Windows 11 Arm64 | Debug/ReleaseSafe build and execute | Debug/ReleaseSafe build and execute |
 
 Release support requires native execution. A new target may initially have a
@@ -23,4 +23,5 @@ native Arm64 compiler exits before build diagnostics on that hosted image.
 To keep that emulated compiler lane bounded, Arm64 runs the complete default
 suite in Debug and ReleaseSafe for both linkages plus one ReleaseSafe execution
 with both independent legacy gates enabled. The full separate default, legacy,
-and legacy-RSA optimization matrix also runs locally and on native x86-64.
+and legacy-RSA optimization matrix also runs locally and on native x86-64,
+whose hosted release lane uses the `windows-2025` runner.

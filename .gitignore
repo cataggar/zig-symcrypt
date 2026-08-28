@@ -9,5 +9,6 @@
 **/.zig-cache/
 /.zig-negative-fixtures/
 /.zig-package-check/
+/.zig-callback-check/
 /zig-out/
 **/zig-out/

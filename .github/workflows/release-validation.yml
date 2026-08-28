@@ -34,6 +34,8 @@ jobs:
         run: zig build abi-local -Dheaders_only=true --summary all
       - name: Exercise precise fail-closed diagnostics
         run: test/build_diagnostics.sh
+      - name: Verify production and test callback symbol separation
+        run: zig build callback-symbol-check
       - name: Exercise provenance compiler and runtime tamper diagnostics
         run: python3 tools/test_fixture_manifest.py
       - name: Extract and rebuild package allow-list

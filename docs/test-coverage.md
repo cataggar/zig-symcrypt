@@ -14,13 +14,15 @@ errors, cached version mismatch, and racing first initialization. Concurrent
 tests cover independent hash/HMAC/random, shared immutable AES/GCM keys,
 AEAD/CBC operations, ECC/ECDH/ECDSA, and allocator-owned teardown.
 
-Static callback allocation tests iterate failure indices until each ECC,
-X25519, and RSA constructor first succeeds, with a defensive upper bound.
-Every failure must be `MemoryAllocationFailure`, return no object, and leave
-the callback allocation balance at zero. SymCrypt 103.13.0 does not safely
+Static callback allocation tests use a dedicated instrumented callback source
+and package option, separate from the production callback source linked by
+examples and consumers. They iterate failure indices until each ECC, X25519,
+and RSA constructor first succeeds, with a defensive upper bound. Every
+failure must be `MemoryAllocationFailure`, return no object, and leave the
+callback allocation balance at zero. SymCrypt 103.13.0 does not safely
 propagate `NULL` from every RSA prime-generation scratch allocation, so the
-RSA-only test seam records the selected callback allocation and defers the
+test-only RSA seam records the selected callback allocation and defers the
 error until the backend call returns; the wrapper then destroys the complete
 key and reports the same allocation error without entering upstream undefined
-behavior. Concurrent static stress keeps injection disabled and exercises the
-production callback fast path without unsynchronized test counters.
+behavior. Production artifacts contain neither that branch nor any exported
+`SymCryptZigTest*` controls; a symbol check enforces the separation.

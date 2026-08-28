@@ -77,6 +77,13 @@ pub fn build(b: *std.Build) void {
     const package_step = b.step("package-check", "Extract and validate the source package allow-list");
     package_step.dependOn(&package_command.step);
 
+    const callback_symbols_command = b.addSystemCommand(&.{ "sh", "test/callback_symbols.sh" });
+    const callback_symbols_step = b.step(
+        "callback-symbol-check",
+        "Verify production callbacks omit test-only fault controls",
+    );
+    callback_symbols_step.dependOn(&callback_symbols_command.step);
+
     const target_ok = validateTarget(b, target, system_include_dirs);
     const libraries_ok = if (headers_only) true else validateLibraries(b, target, linkage, libraries);
 
@@ -98,7 +105,7 @@ pub fn build(b: *std.Build) void {
         return;
     }
 
-    const options = makeOptions(b, linkage, include_dir, checked, false, legacy, legacy_rsa);
+    const options = makeOptions(b, linkage, include_dir, checked, false, false, legacy, legacy_rsa);
     const symcrypt = b.addModule("symcrypt", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -108,7 +115,7 @@ pub fn build(b: *std.Build) void {
     configureHeaders(symcrypt, include_dir, system_include_dirs, checked, options);
 
     if (target_ok and libraries_ok and !headers_only) {
-        configureNative(b, symcrypt, target, linkage, libraries);
+        configureNative(b, symcrypt, target, linkage, libraries, false);
     }
 
     const abi_local_step = b.step(
@@ -303,6 +310,7 @@ fn makeOptions(
     include_dir: std.Build.LazyPath,
     checked: bool,
     init_test_hooks: bool,
+    callback_fault_injection: bool,
     legacy: bool,
     legacy_rsa: bool,
 ) *std.Build.Step.Options {
@@ -311,6 +319,7 @@ fn makeOptions(
     options.addOption([]const u8, "include_dir", include_dir.getDisplayName());
     options.addOption(bool, "checked", checked);
     options.addOption(bool, "init_test_hooks", init_test_hooks);
+    options.addOption(bool, "callback_fault_injection", callback_fault_injection);
     options.addOption(bool, "legacy", legacy);
     options.addOption(bool, "enable_legacy_rsa_pkcs1_encryption", legacy_rsa);
     options.addOption(bool, "enable_mlkem", false);
@@ -337,6 +346,7 @@ fn configureNative(
     target: std.Build.ResolvedTarget,
     linkage: Linkage,
     libraries: []const std.Build.LazyPath,
+    callback_fault_injection: bool,
 ) void {
     for (libraries) |library| module.addObjectFile(library);
 
@@ -349,7 +359,11 @@ fn configureNative(
 
     if (linkage == .static) {
         module.addCSourceFile(.{ .file = b.path("src/static_environment.c"), .flags = &.{"-std=c11"} });
-        module.addCSourceFile(.{ .file = b.path("src/callbacks.c"), .flags = &.{"-std=c11"} });
+        module.addCSourceFile(.{ .file = b.path("src/callback_runtime.c"), .flags = &.{"-std=c11"} });
+        module.addCSourceFile(.{
+            .file = b.path(if (callback_fault_injection) "test/callbacks.c" else "src/callbacks.c"),
+            .flags = &.{"-std=c11"},
+        });
         if (target.result.os.tag == .linux) {
             module.linkSystemLibrary("atomic", .{});
             module.linkSystemLibrary("pthread", .{});
@@ -559,7 +573,7 @@ fn addAbiMatrix(
         if (query.os_tag == .windows and !windows_available) continue;
         inline for (.{ false, true }) |checked| {
             const target = b.resolveTargetQuery(query);
-            const options = makeOptions(b, .dynamic, include_dir, checked, false, legacy, legacy_rsa);
+            const options = makeOptions(b, .dynamic, include_dir, checked, false, false, legacy, legacy_rsa);
             const module = b.createModule(.{
                 .root_source_file = b.path("src/root.zig"),
                 .target = target,
@@ -596,13 +610,35 @@ fn addNativeTests(
     test_step: *std.Build.Step,
     test_compile_step: *std.Build.Step,
 ) void {
+    const native_test_symcrypt = if (linkage == .static) test_module: {
+        const test_options = makeOptions(
+            b,
+            linkage,
+            include_dir,
+            checked,
+            false,
+            true,
+            legacy,
+            legacy_rsa,
+        );
+        const module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        configureHeaders(module, include_dir, system_include_dirs, checked, test_options);
+        configureNative(b, module, target, linkage, libraries, true);
+        break :test_module module;
+    } else symcrypt;
+
     const test_mod = b.createModule(.{
         .root_source_file = b.path("test/all.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    test_mod.addImport("symcrypt", symcrypt);
+    test_mod.addImport("symcrypt", native_test_symcrypt);
     test_mod.addIncludePath(include_dir);
     for (system_include_dirs) |dir| test_mod.addSystemIncludePath(dir);
     if (checked) test_mod.addCMacro("DBG", "1");
@@ -610,7 +646,7 @@ fn addNativeTests(
     test_compile_step.dependOn(&tests.step);
     test_step.dependOn(runArtifactStep(b, tests, target, linkage, provenance, libraries));
 
-    const package_test_options = makeOptions(b, linkage, include_dir, checked, false, legacy, legacy_rsa);
+    const package_test_options = makeOptions(b, linkage, include_dir, checked, false, false, legacy, legacy_rsa);
     const package_test_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -638,7 +674,7 @@ fn addNativeTests(
         libraries,
     ));
 
-    const concurrency_options = makeOptions(b, linkage, include_dir, checked, true, legacy, legacy_rsa);
+    const concurrency_options = makeOptions(b, linkage, include_dir, checked, true, false, legacy, legacy_rsa);
     const concurrency_mod = b.createModule(.{
         .root_source_file = b.path("src/init_concurrency_test.zig"),
         .target = target,
@@ -667,7 +703,7 @@ fn addNativeTests(
     ));
 
     if (linkage == .dynamic) {
-        const mismatch_options = makeOptions(b, .dynamic, include_dir, checked, false, legacy, legacy_rsa);
+        const mismatch_options = makeOptions(b, .dynamic, include_dir, checked, false, false, legacy, legacy_rsa);
         const mismatch_mod = b.createModule(.{
             .root_source_file = b.path("src/mismatch_test.zig"),
             .target = target,
@@ -687,7 +723,7 @@ fn addNativeTests(
             libraries,
         ));
 
-        const api_mismatch_options = makeOptions(b, .dynamic, include_dir, checked, false, legacy, legacy_rsa);
+        const api_mismatch_options = makeOptions(b, .dynamic, include_dir, checked, false, false, legacy, legacy_rsa);
         const api_mismatch_mod = b.createModule(.{
             .root_source_file = b.path("src/mismatch_api_test.zig"),
             .target = target,
