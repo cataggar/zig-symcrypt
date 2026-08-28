@@ -12,6 +12,9 @@
 #define SYMCRYPT_ZIG_IMPORT_DATA(name) \
     __declspec(dllimport) extern const PCSYMCRYPT_MAC name
 
+#define SYMCRYPT_ZIG_IMPORT_BLOCKCIPHER(name) \
+    __declspec(dllimport) extern const PCSYMCRYPT_BLOCKCIPHER name
+
 SYMCRYPT_ZIG_IMPORT_DATA(SymCryptHmacMd5Algorithm);
 SYMCRYPT_ZIG_IMPORT_DATA(SymCryptHmacSha1Algorithm);
 SYMCRYPT_ZIG_IMPORT_DATA(SymCryptHmacSha256Algorithm);
@@ -21,6 +24,7 @@ SYMCRYPT_ZIG_IMPORT_DATA(SymCryptHmacSha3_224Algorithm);
 SYMCRYPT_ZIG_IMPORT_DATA(SymCryptHmacSha3_256Algorithm);
 SYMCRYPT_ZIG_IMPORT_DATA(SymCryptHmacSha3_384Algorithm);
 SYMCRYPT_ZIG_IMPORT_DATA(SymCryptHmacSha3_512Algorithm);
+SYMCRYPT_ZIG_IMPORT_BLOCKCIPHER(SymCryptAesBlockCipher);
 
 PCSYMCRYPT_MAC SymCryptZigHmacMd5Algorithm(void) { return SymCryptHmacMd5Algorithm; }
 PCSYMCRYPT_MAC SymCryptZigHmacSha1Algorithm(void) { return SymCryptHmacSha1Algorithm; }
@@ -31,3 +35,4 @@ PCSYMCRYPT_MAC SymCryptZigHmacSha3_224Algorithm(void) { return SymCryptHmacSha3_
 PCSYMCRYPT_MAC SymCryptZigHmacSha3_256Algorithm(void) { return SymCryptHmacSha3_256Algorithm; }
 PCSYMCRYPT_MAC SymCryptZigHmacSha3_384Algorithm(void) { return SymCryptHmacSha3_384Algorithm; }
 PCSYMCRYPT_MAC SymCryptZigHmacSha3_512Algorithm(void) { return SymCryptHmacSha3_512Algorithm; }
+PCSYMCRYPT_BLOCKCIPHER SymCryptZigAesBlockCipher(void) { return SymCryptAesBlockCipher; }

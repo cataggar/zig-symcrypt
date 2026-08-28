@@ -11,6 +11,12 @@ const c = @cImport({
     @cInclude("symcrypt.h");
 });
 
+test {
+    _ = @import("aead/aes_gcm.zig");
+    _ = @import("aead/chacha20_poly1305.zig");
+    _ = @import("cipher/aes_cbc.zig");
+}
+
 fn expectHex(comptime expected: []const u8, actual: anytype) !void {
     const encoded = std.fmt.bytesToHex(actual, .lower);
     try std.testing.expectEqualStrings(expected, &encoded);

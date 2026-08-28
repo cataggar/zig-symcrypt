@@ -118,6 +118,64 @@ try symcrypt.random.fill(&nonce);
 _ = .{ digest, checkpoint, final_digest, mac, tag };
 ```
 
+Authenticated encryption and raw AES-CBC are exposed through explicit
+caller-buffer and allocator-owned APIs:
+
+```zig
+const key = [_]u8{0x42} ** 16;
+const nonce = [_]u8{0x24} ** 12; // must be unique for every encryption with this key
+const gcm = try symcrypt.aead.Aes128Gcm.init(allocator, &key);
+defer gcm.deinit();
+
+var sealed = try gcm.sealAlloc(allocator, &nonce, "metadata", "message", 16);
+defer sealed.deinit();
+var opened = try gcm.openAlloc(
+    allocator,
+    &nonce,
+    "metadata",
+    sealed.ciphertext(),
+    sealed.tag(),
+);
+defer opened.deinit(); // wipes the complete plaintext allocation before free
+
+const aes = try symcrypt.cipher.AesKey.init(allocator, &key);
+defer aes.deinit();
+var iv = [_]u8{0} ** symcrypt.cipher.block_size;
+var blocks: [32]u8 = undefined; // length must be an exact multiple of 16
+try aes.cbcEncryptInPlace(&iv, &blocks);
+```
+
+`Aes128Gcm` and `Aes256Gcm` accept non-empty byte nonces, 12-16 byte
+authentication tags, AAD shorter than `2^61` bytes, and data no longer than
+`2^36 - 32` bytes. `ChaCha20Poly1305` requires a 32-byte key, 12-byte nonce,
+16-byte tag, and at most `274,877,906,880` data bytes. Reusing a key/nonce
+pair with either AEAD catastrophically breaks security.
+
+Caller-buffer out-of-place operations require fully disjoint buffers.
+Dedicated in-place operations pass one exact source/destination region.
+Every partial overlap is rejected, as are overlaps between mutable output and
+the key, nonce, AAD, or detached tag. Validation failures do not mutate caller
+buffers. Authentication failure wipes the complete plaintext destination with
+an initialization-independent secure zero operation; for in-place decryption
+this intentionally destroys the ciphertext. Owned sealing allocates one
+`ciphertext.len + tag.len` backing region and writes both slices directly.
+Owned opening and CBC operations allocate their exact output once without
+staging or copy-after-FFI paths.
+
+AES-CBC supports 128-, 192-, and 256-bit AES keys for rust-symcrypt parity.
+It is a raw, unauthenticated block-mode primitive: **there is no implicit
+padding of any kind**. Inputs must be empty or a multiple of 16 bytes, and the
+caller-provided IV/chaining value is updated to the final chain. Applications
+must select and validate any padding separately and must authenticate CBC
+ciphertext before use; AEAD is preferred for new protocols.
+
+AEAD and AES expanded keys are opaque allocator-owned handles whose
+self-referential SymCrypt state is created at its final stable address. Call
+`deinit` exactly once. Deinitialization and all post-allocation failure paths
+wipe the complete imported C object before exactly one free. Expanded keys are
+immutable after creation and can be used concurrently with independent
+buffers, nonces, and CBC IVs.
+
 Supported default hash families are SHA-256, SHA-384, SHA-512, SHA3-224,
 SHA3-256, SHA3-384, and SHA3-512. Pinned SymCrypt 103.13.0 publicly exposes
 one-shot/incremental HMAC and HKDF for all of those families, so the same matrix
