@@ -89,16 +89,24 @@ jobs:
             -Dlinkage=dynamic -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
             --summary all
           if ($LASTEXITCODE -ne 0) { throw "dynamic ReleaseSafe tests failed" }
-          foreach ($optimize in @("Debug", "ReleaseSafe")) {
-            zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
-              -Dlinkage=dynamic -Dlegacy=true `
-              -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
-            if ($LASTEXITCODE -ne 0) { throw "dynamic legacy $optimize tests failed" }
-            zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
+          if ("${{ matrix.arch }}" -eq "x86_64") {
+            foreach ($optimize in @("Debug", "ReleaseSafe")) {
+              zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
+                -Dlinkage=dynamic -Dlegacy=true `
+                -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
+              if ($LASTEXITCODE -ne 0) { throw "dynamic legacy $optimize tests failed" }
+              zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
+                -Dlinkage=dynamic -Dlegacy=true `
+                -Denable_legacy_rsa_pkcs1_encryption=true `
+                -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
+              if ($LASTEXITCODE -ne 0) { throw "dynamic legacy RSA $optimize tests failed" }
+            }
+          } else {
+            zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe `
               -Dlinkage=dynamic -Dlegacy=true `
               -Denable_legacy_rsa_pkcs1_encryption=true `
               -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
-            if ($LASTEXITCODE -ne 0) { throw "dynamic legacy RSA $optimize tests failed" }
+            if ($LASTEXITCODE -ne 0) { throw "dynamic Arm64 legacy gates failed" }
           }
           zig build example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe `
             -Dlinkage=dynamic -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core"
@@ -125,16 +133,24 @@ jobs:
             -Dlinkage=static -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
             --summary all
           if ($LASTEXITCODE -ne 0) { throw "static ReleaseSafe tests failed" }
-          foreach ($optimize in @("Debug", "ReleaseSafe")) {
-            zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
-              -Dlinkage=static -Dlegacy=true `
-              -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
-            if ($LASTEXITCODE -ne 0) { throw "static legacy $optimize tests failed" }
-            zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
+          if ("${{ matrix.arch }}" -eq "x86_64") {
+            foreach ($optimize in @("Debug", "ReleaseSafe")) {
+              zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
+                -Dlinkage=static -Dlegacy=true `
+                -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
+              if ($LASTEXITCODE -ne 0) { throw "static legacy $optimize tests failed" }
+              zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
+                -Dlinkage=static -Dlegacy=true `
+                -Denable_legacy_rsa_pkcs1_encryption=true `
+                -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
+              if ($LASTEXITCODE -ne 0) { throw "static legacy RSA $optimize tests failed" }
+            }
+          } else {
+            zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe `
               -Dlinkage=static -Dlegacy=true `
               -Denable_legacy_rsa_pkcs1_encryption=true `
               -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
-            if ($LASTEXITCODE -ne 0) { throw "static legacy RSA $optimize tests failed" }
+            if ($LASTEXITCODE -ne 0) { throw "static Arm64 legacy gates failed" }
           }
           zig build example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe `
             -Dlinkage=static -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core"

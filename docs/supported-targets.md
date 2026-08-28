@@ -20,3 +20,7 @@ The tested toolchain is Zig 0.16.0 and SymCrypt 103.13.0 at commit
 The Windows Arm64 runner executes Arm64 outputs natively; CI uses the
 SHA-256-pinned x86-64 Zig compiler under Windows emulation because the 0.16.0
 native Arm64 compiler exits before build diagnostics on that hosted image.
+To keep that emulated compiler lane bounded, Arm64 runs the complete default
+suite in Debug and ReleaseSafe for both linkages plus one ReleaseSafe execution
+with both independent legacy gates enabled. The full separate default, legacy,
+and legacy-RSA optimization matrix also runs locally and on native x86-64.
