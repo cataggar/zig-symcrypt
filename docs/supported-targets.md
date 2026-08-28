@@ -17,3 +17,6 @@ header or library search with a diagnostic listing the supported triples.
 
 The tested toolchain is Zig 0.16.0 and SymCrypt 103.13.0 at commit
 `286762b7730e2b780678f5ab11fef2b1bad639e0`.
+The Windows Arm64 runner executes Arm64 outputs natively; CI uses the
+SHA-256-pinned x86-64 Zig compiler under Windows emulation because the 0.16.0
+native Arm64 compiler exits before build diagnostics on that hosted image.

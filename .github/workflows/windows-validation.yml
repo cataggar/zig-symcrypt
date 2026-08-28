@@ -25,7 +25,7 @@ jobs:
         include:
           - target: x86_64-windows-msvc
             arch: x86_64
-            runner: windows-2025-vs2026
+            runner: windows-2022
           - target: aarch64-windows-msvc
             arch: aarch64
             runner: windows-11-vs2026-arm
@@ -44,6 +44,24 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.16.0
+      - name: Use provenance-checked x86-64 Zig under Arm64 emulation
+        if: matrix.arch == 'aarch64'
+        shell: pwsh
+        run: |
+          $directory = "$env:GITHUB_WORKSPACE/.tools/zig-x86_64"
+          $archive = "$env:GITHUB_WORKSPACE/.tools/zig-x86_64-windows-0.16.0.zip"
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE/.tools" | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip" `
+            -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $expected = "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e"
+          if ($actual -ne $expected) {
+            throw "x86-64 Zig archive SHA-256 mismatch: found $actual, expected $expected"
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $directory
+          $bin = Join-Path $directory "zig-x86_64-windows-0.16.0"
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Build immutable pinned fixtures
         shell: pwsh
         run: |
