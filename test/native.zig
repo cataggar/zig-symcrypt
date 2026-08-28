@@ -25,25 +25,6 @@ test "initialization is repeatable and SymCrypt SHA-256 is usable" {
     );
 }
 
-test "concurrent initialization has one terminal result" {
-    const Worker = struct {
-        fn run(failed: *bool) void {
-            symcrypt.init() catch {
-                @atomicStore(bool, failed, true, .release);
-                return;
-            };
-            var digest: [32]u8 = undefined;
-            c.SymCryptSha256(null, 0, &digest);
-        }
-    };
-
-    var failed = false;
-    var threads: [16]std.Thread = undefined;
-    for (&threads) |*thread| thread.* = try std.Thread.spawn(.{}, Worker.run, .{&failed});
-    for (&threads) |*thread| thread.join();
-    try std.testing.expect(!@atomicLoad(bool, &failed, .acquire));
-}
-
 test "static callbacks allocate, randomize, and synchronize" {
     if (symcrypt.linkage != .static) return error.SkipZigTest;
 

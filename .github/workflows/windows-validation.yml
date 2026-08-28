@@ -1,0 +1,112 @@
+name: Windows validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  abi:
+    name: Full ABI matrix (Windows SDK)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: ilammy/msvc-dev-cmd@460a772e4cf7358f9f2f23773240813e40e7a894
+        with:
+          arch: amd64_arm64
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.16.0
+      - name: Compile all FRE and checked ABI canaries
+        run: zig build abi -Dheaders_only=true
+
+  link:
+    name: ${{ matrix.target }} (${{ matrix.execution }})
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-windows-msvc
+            platform: x64
+            flavor: amd64fre
+            dev_arch: amd64
+            execution: execute
+          - target: aarch64-windows-msvc
+            platform: ARM64
+            flavor: arm64fre
+            dev_arch: amd64_arm64
+            execution: build-only
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          repository: microsoft/SymCrypt
+          ref: 286762b7730e2b780678f5ab11fef2b1bad639e0
+          path: SymCrypt
+      - uses: ilammy/msvc-dev-cmd@460a772e4cf7358f9f2f23773240813e40e7a894
+        with:
+          arch: ${{ matrix.dev_arch }}
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.16.0
+      - name: Build pinned SymCrypt dynamic and static libraries
+        shell: pwsh
+        run: >
+          msbuild SymCrypt/modules/windows/user/symcrypt.vcxproj
+          /m /t:Rebuild
+          /p:Platform=${{ matrix.platform }}
+          /p:Configuration=Release
+      - name: Locate and verify link inputs
+        shell: pwsh
+        run: |
+          $base = Join-Path $env:GITHUB_WORKSPACE "SymCrypt/build/bin/${{ matrix.flavor }}"
+          $dllDir = Join-Path $base "dll"
+          $importLib = Join-Path $dllDir "symcrypt.lib"
+          $dll = Join-Path $dllDir "symcrypt.dll"
+          $staticLib = Join-Path $base "lib/symcrypt_static_NoCIL.lib"
+          foreach ($path in @($importLib, $dll, $staticLib)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "missing expected ${{ matrix.target }} SymCrypt artifact: $path"
+            }
+          }
+          "SYMCRYPT_IMPORT_LIB=$importLib" >> $env:GITHUB_ENV
+          "SYMCRYPT_STATIC_LIB=$staticLib" >> $env:GITHUB_ENV
+          $dllDir >> $env:GITHUB_PATH
+      - name: Execute dynamic tests
+        if: matrix.execution == 'execute'
+        run: >
+          zig build test
+          -Dtarget=${{ matrix.target }}
+          -Dlinkage=dynamic
+          -Dsymcrypt_libraries="$env:SYMCRYPT_IMPORT_LIB"
+      - name: Execute static tests
+        if: matrix.execution == 'execute'
+        run: >
+          zig build test
+          -Dtarget=${{ matrix.target }}
+          -Dlinkage=static
+          -Dsymcrypt_libraries="$env:SYMCRYPT_STATIC_LIB"
+      - name: Compile-link dynamic tests
+        if: matrix.execution == 'build-only'
+        run: >
+          zig build test-compile
+          -Dtarget=${{ matrix.target }}
+          -Dlinkage=dynamic
+          -Dsymcrypt_libraries="$env:SYMCRYPT_IMPORT_LIB"
+      - name: Compile-link static tests
+        if: matrix.execution == 'build-only'
+        run: >
+          zig build test-compile
+          -Dtarget=${{ matrix.target }}
+          -Dlinkage=static
+          -Dsymcrypt_libraries="$env:SYMCRYPT_STATIC_LIB"

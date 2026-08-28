@@ -39,6 +39,22 @@ Options:
 - `symcrypt_checked`: define `DBG=1`; this must match the supplied binary.
 - `headers_only`: package-maintainer ABI compilation without native binaries.
 
+Maintainer validation distinguishes checks available from the current host from
+the advertised full target matrix:
+
+```sh
+zig build abi-local -Dheaders_only=true
+zig build abi -Dheaders_only=true
+```
+
+`abi-local` checks Linux targets and also checks Windows when a native Windows
+SDK or explicit `symcrypt_system_include_dirs` are available. `abi` is the full
+release gate and fails rather than skipping Windows when the SDK inputs are
+absent. GitHub Actions runs that full ABI gate on Windows, executes dynamic and
+static tests on Windows x86_64, and compile-links both test sets for Windows
+ARM64. Native Windows ARM64 execution remains a release gate on an ARM64
+runner.
+
 For command-line use, repeat the path option to preserve archive order:
 
 ```sh

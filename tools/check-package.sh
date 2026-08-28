@@ -21,7 +21,7 @@ cp -R examples src test tools vendor "$scratch/"
 (
     cd "$scratch"
     zig build --help >/dev/null
-    zig build abi -Dheaders_only=true
+    zig build abi-local -Dheaders_only=true
 )
 
 echo "package metadata and header-only build passed"
