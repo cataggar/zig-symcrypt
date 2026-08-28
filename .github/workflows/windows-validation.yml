@@ -20,14 +20,23 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: ilammy/msvc-dev-cmd@460a772e4cf7358f9f2f23773240813e40e7a894
-        with:
-          arch: amd64_arm64
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.16.0
       - name: Compile all FRE and checked ABI canaries
-        run: zig build abi -Dheaders_only=true
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $installation = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+              Microsoft.VisualStudio.Component.VC.Tools.ARM64 `
+            -property installationPath
+          if (-not $installation) {
+            throw "Visual Studio with the MSVC ARM64 toolchain was not found"
+          }
+          . (Join-Path $installation "Common7/Tools/Launch-VsDevShell.ps1") `
+            -Arch arm64 -HostArch amd64 -SkipAutomaticLocation
+          zig build abi -Dheaders_only=true
 
   link:
     name: ${{ matrix.target }} (${{ matrix.execution }})
@@ -40,11 +49,13 @@ jobs:
             platform: x64
             flavor: amd64fre
             dev_arch: amd64
+            component: Microsoft.VisualStudio.Component.VC.Tools.x86.x64
             execution: execute
           - target: aarch64-windows-msvc
             platform: ARM64
             flavor: arm64fre
-            dev_arch: amd64_arm64
+            dev_arch: arm64
+            component: Microsoft.VisualStudio.Component.VC.Tools.ARM64
             execution: build-only
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
@@ -53,22 +64,28 @@ jobs:
           repository: microsoft/SymCrypt
           ref: 286762b7730e2b780678f5ab11fef2b1bad639e0
           path: SymCrypt
-      - uses: ilammy/msvc-dev-cmd@460a772e4cf7358f9f2f23773240813e40e7a894
-        with:
-          arch: ${{ matrix.dev_arch }}
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.16.0
-      - name: Build pinned SymCrypt dynamic and static libraries
-        shell: pwsh
-        run: >
-          msbuild SymCrypt/modules/windows/user/symcrypt.vcxproj
-          /m /t:Rebuild
-          /p:Platform=${{ matrix.platform }}
-          /p:Configuration=Release
-      - name: Locate and verify link inputs
+      - name: Build and validate pinned SymCrypt
         shell: pwsh
         run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $installation = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+              ${{ matrix.component }} `
+            -property installationPath
+          if (-not $installation) {
+            throw "Visual Studio with the ${{ matrix.platform }} MSVC toolchain was not found"
+          }
+          . (Join-Path $installation "Common7/Tools/Launch-VsDevShell.ps1") `
+            -Arch ${{ matrix.dev_arch }} -HostArch amd64 -SkipAutomaticLocation
+
+          msbuild SymCrypt/modules/windows/user/symcrypt.vcxproj `
+            /m /t:Rebuild `
+            /p:Platform=${{ matrix.platform }} `
+            /p:Configuration=Release
+
           $base = Join-Path $env:GITHUB_WORKSPACE "SymCrypt/build/bin/${{ matrix.flavor }}"
           $dllDir = Join-Path $base "dll"
           $importLib = Join-Path $dllDir "symcrypt.lib"
@@ -79,34 +96,24 @@ jobs:
               throw "missing expected ${{ matrix.target }} SymCrypt artifact: $path"
             }
           }
-          "SYMCRYPT_IMPORT_LIB=$importLib" >> $env:GITHUB_ENV
-          "SYMCRYPT_STATIC_LIB=$staticLib" >> $env:GITHUB_ENV
-          $dllDir >> $env:GITHUB_PATH
-      - name: Execute dynamic tests
-        if: matrix.execution == 'execute'
-        run: >
-          zig build test
-          -Dtarget=${{ matrix.target }}
-          -Dlinkage=dynamic
-          -Dsymcrypt_libraries="$env:SYMCRYPT_IMPORT_LIB"
-      - name: Execute static tests
-        if: matrix.execution == 'execute'
-        run: >
-          zig build test
-          -Dtarget=${{ matrix.target }}
-          -Dlinkage=static
-          -Dsymcrypt_libraries="$env:SYMCRYPT_STATIC_LIB"
-      - name: Compile-link dynamic tests
-        if: matrix.execution == 'build-only'
-        run: >
-          zig build test-compile
-          -Dtarget=${{ matrix.target }}
-          -Dlinkage=dynamic
-          -Dsymcrypt_libraries="$env:SYMCRYPT_IMPORT_LIB"
-      - name: Compile-link static tests
-        if: matrix.execution == 'build-only'
-        run: >
-          zig build test-compile
-          -Dtarget=${{ matrix.target }}
-          -Dlinkage=static
-          -Dsymcrypt_libraries="$env:SYMCRYPT_STATIC_LIB"
+          $env:Path = "$dllDir;$env:Path"
+
+          if ("${{ matrix.execution }}" -eq "execute") {
+            zig build test `
+              -Dtarget=${{ matrix.target }} `
+              -Dlinkage=dynamic `
+              -Dsymcrypt_libraries="$importLib"
+            zig build test `
+              -Dtarget=${{ matrix.target }} `
+              -Dlinkage=static `
+              -Dsymcrypt_libraries="$staticLib"
+          } else {
+            zig build test-compile `
+              -Dtarget=${{ matrix.target }} `
+              -Dlinkage=dynamic `
+              -Dsymcrypt_libraries="$importLib"
+            zig build test-compile `
+              -Dtarget=${{ matrix.target }} `
+              -Dlinkage=static `
+              -Dsymcrypt_libraries="$staticLib"
+          }
