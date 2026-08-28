@@ -34,6 +34,8 @@ jobs:
         run: zig build abi-local -Dheaders_only=true --summary all
       - name: Exercise precise fail-closed diagnostics
         run: test/build_diagnostics.sh
+      - name: Exercise provenance compiler and runtime tamper diagnostics
+        run: python3 tools/test_fixture_manifest.py
       - name: Extract and rebuild package allow-list
         run: zig build package-check
       - name: Reject release binaries and local sibling dependencies

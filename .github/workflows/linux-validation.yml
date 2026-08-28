@@ -122,3 +122,19 @@ jobs:
             -Dlinkage=static "${libraries[@]}"
           zig build consumer-example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
             -Dlinkage=static "${libraries[@]}"
+      - name: Exercise actual release packaging and atomic failure cleanup
+        if: matrix.arch == 'x86_64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$GITHUB_WORKSPACE/.symcrypt-ci/${{ matrix.arch }}"
+          shared="$fixture/module/generic/libsymcrypt.so"
+          export LD_LIBRARY_PATH="$(dirname "$shared")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          python3 tools/test_release_package.py \
+            --target "${{ matrix.target }}" \
+            --linkage dynamic \
+            --provenance "$fixture/provenance.json" \
+            --library "$fixture/lib/libsymcrypt_plus.a" \
+            --library "$shared" \
+            --later-stage \
+            --positive

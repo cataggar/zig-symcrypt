@@ -86,17 +86,19 @@ jobs:
             --summary all
           if ($LASTEXITCODE -ne 0) { throw "dynamic ABI release gate failed" }
           zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe `
-            -Dlinkage=dynamic -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
+            -Dlinkage=dynamic -Dsymcrypt_provenance="$manifest" `
+            -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
             --summary all
           if ($LASTEXITCODE -ne 0) { throw "dynamic ReleaseSafe tests failed" }
           if ("${{ matrix.arch }}" -eq "x86_64") {
             foreach ($optimize in @("Debug", "ReleaseSafe")) {
               zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
-                -Dlinkage=dynamic -Dlegacy=true `
+                -Dlinkage=dynamic -Dlegacy=true -Dsymcrypt_provenance="$manifest" `
                 -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
               if ($LASTEXITCODE -ne 0) { throw "dynamic legacy $optimize tests failed" }
               zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
                 -Dlinkage=dynamic -Dlegacy=true `
+                -Dsymcrypt_provenance="$manifest" `
                 -Denable_legacy_rsa_pkcs1_encryption=true `
                 -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
               if ($LASTEXITCODE -ne 0) { throw "dynamic legacy RSA $optimize tests failed" }
@@ -104,15 +106,18 @@ jobs:
           } else {
             zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe `
               -Dlinkage=dynamic -Dlegacy=true `
+              -Dsymcrypt_provenance="$manifest" `
               -Denable_legacy_rsa_pkcs1_encryption=true `
               -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
             if ($LASTEXITCODE -ne 0) { throw "dynamic Arm64 legacy gates failed" }
           }
           zig build example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe `
-            -Dlinkage=dynamic -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core"
+            -Dlinkage=dynamic -Dsymcrypt_provenance="$manifest" `
+            -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core"
           if ($LASTEXITCODE -ne 0) { throw "dynamic examples failed" }
           zig build consumer-example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe `
-            -Dlinkage=dynamic -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core"
+            -Dlinkage=dynamic -Dsymcrypt_provenance="$manifest" `
+            -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core"
           if ($LASTEXITCODE -ne 0) { throw "dynamic consumer failed" }
       - name: Verify and execute complete static matrix
         shell: pwsh

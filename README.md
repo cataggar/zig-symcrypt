@@ -89,15 +89,21 @@ import `symcrypt.lib`, never the DLL. Static mode takes
 `symcrypt_plus_NoCIL.lib` followed by `symcrypt_static_NoCIL.lib`. Windows builds require native
 MSVC/SDK discovery. Linux dynamic deployments must make the matching SONAME
 reachable through normal loader paths or an application-owned rpath. Put
-`symcrypt.dll` beside the Windows executable or on its documented DLL search
-path. This package does not copy binaries or mutate loader configuration.
+the exact pinned `symcrypt_zig_103_13.dll` beside the Windows executable.
+Release validation records that DLL separately from its import library and
+stages a hash- and architecture-verified copy beside every executed test or
+consumer, so `PATH` cannot select an unverified inbox/substitute DLL. This
+package does not install binaries or mutate system loader configuration.
 
 Maintainers can build native Linux fixtures with
 `tools/build-linux-fixtures.sh SOURCE OUTPUT x86_64` or `aarch64`. The script
 fails unless the native host matches the requested architecture and the source,
 tag, version, Jitterentropy gitlink, and emitted ELF artifacts match the
 103.13.0 pin. It emits `provenance.json` containing the exact ordered library
-roles, architecture, and SHA-256 hashes. Pass that file to
+roles, architecture, and SHA-256 hashes, plus the actual compiler executable,
+producer/version, target, and toolchain installation metadata. Windows
+manifests additionally bind the exact PE runtime DLL, version resources, and
+related import library. Pass that file to
 `zig build abi-release-gate -Dsymcrypt_provenance=...`.
 
 ## Cryptographic primitives

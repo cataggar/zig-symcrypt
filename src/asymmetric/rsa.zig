@@ -9,6 +9,8 @@ const state_memory = @import("../internal/state.zig");
 const asymmetric = @import("../asymmetric.zig");
 const hashes = @import("hash_support.zig");
 
+extern fn SymCryptZigTestConsumeDeferredAllocationFailure() c.BOOLEAN;
+
 pub const Usage = struct {
     sign: bool = false,
     encrypt: bool = false,
@@ -108,12 +110,17 @@ pub const PrivateKey = opaque {
         const implementation = try allocateKey(allocator, modulus_bits, true, requested_usage);
         errdefer destroy(implementation);
         var exponent_storage = public_exponent orelse 0;
-        try errors.check(c.SymCryptRsakeyGenerate(
+        const result = c.SymCryptRsakeyGenerate(
             implementation.key_object,
             if (public_exponent != null) &exponent_storage else null,
             if (public_exponent != null) 1 else 0,
             try requested_usage.flags(),
-        ));
+        );
+        if (comptime std.mem.eql(u8, options.linkage, "static")) {
+            if (SymCryptZigTestConsumeDeferredAllocationFailure() != 0)
+                return error.MemoryAllocationFailure;
+        }
+        try errors.check(result);
         return @ptrCast(implementation);
     }
 

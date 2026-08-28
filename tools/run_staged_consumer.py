@@ -34,6 +34,7 @@ def main() -> None:
     parser.add_argument("--checked", required=True)
     parser.add_argument("--legacy", required=True)
     parser.add_argument("--legacy-rsa", required=True)
+    parser.add_argument("--provenance")
     parser.add_argument("--library", action="append", default=[])
     args = parser.parse_args()
 
@@ -71,6 +72,8 @@ def main() -> None:
             f"-Denable_legacy_rsa_pkcs1_encryption={args.legacy_rsa}",
         ]
         command.extend(f"-Dsymcrypt_libraries={pathlib.Path(path).resolve()}" for path in args.library)
+        if args.provenance:
+            command.append(f"-Dsymcrypt_provenance={pathlib.Path(args.provenance).resolve()}")
         subprocess.run(command, cwd=stage / "examples" / args.linkage, check=True)
     finally:
         shutil.rmtree(ROOT / ".zig-consumer-stage", ignore_errors=True)

@@ -159,6 +159,8 @@ pub fn build(b: *std.Build) void {
         checked,
         legacy,
         legacy_rsa,
+        provenance,
+        libraries,
         test_step,
         test_compile_step,
     );
@@ -244,6 +246,7 @@ pub fn build(b: *std.Build) void {
         checked,
         legacy,
         legacy_rsa,
+        provenance,
         consumer_example_step,
     );
 
@@ -251,20 +254,34 @@ pub fn build(b: *std.Build) void {
         "release-package",
         "Create the allow-listed source archive after ABI, tests, package, examples, and tag checks",
     );
-    release_package_step.dependOn(abi_release_step);
-    release_package_step.dependOn(format_step);
-    release_package_step.dependOn(package_step);
-    release_package_step.dependOn(consumer_example_step);
-    if (release_tag) |tag| {
+    if (release_tag != null and provenance != null) {
         const archive = b.addSystemCommand(&.{
             "python3",
             "tools/release_package.py",
             "--tag",
-            tag,
+            release_tag.?,
         });
-        if (provenance) |manifest| {
-            archive.addArg("--provenance");
-            archive.addFileArg(manifest);
+        archive.addArg("--provenance");
+        archive.addFileArg(provenance.?);
+        archive.addArgs(&.{
+            "--target",
+            canonicalTargetTriple(b, target),
+            "--optimize",
+            @tagName(optimize),
+            "--linkage",
+            @tagName(linkage),
+            "--include",
+            include_dir.getPath(b),
+            "--checked",
+            if (checked) "true" else "false",
+            "--legacy",
+            if (legacy) "true" else "false",
+            "--legacy-rsa",
+            if (legacy_rsa) "true" else "false",
+        });
+        for (libraries) |library| {
+            archive.addArg("--library");
+            archive.addFileArg(library);
         }
         release_package_step.dependOn(&archive.step);
     } else {
@@ -574,6 +591,8 @@ fn addNativeTests(
     checked: bool,
     legacy: bool,
     legacy_rsa: bool,
+    provenance: ?std.Build.LazyPath,
+    libraries: []const std.Build.LazyPath,
     test_step: *std.Build.Step,
     test_compile_step: *std.Build.Step,
 ) void {
@@ -588,9 +607,8 @@ fn addNativeTests(
     for (system_include_dirs) |dir| test_mod.addSystemIncludePath(dir);
     if (checked) test_mod.addCMacro("DBG", "1");
     const tests = b.addTest(.{ .root_module = test_mod });
-    const run_tests = b.addRunArtifact(tests);
     test_compile_step.dependOn(&tests.step);
-    test_step.dependOn(&run_tests.step);
+    test_step.dependOn(runArtifactStep(b, tests, target, linkage, provenance, libraries));
 
     const package_test_options = makeOptions(b, linkage, include_dir, checked, false, legacy, legacy_rsa);
     const package_test_mod = b.createModule(.{
@@ -610,9 +628,15 @@ fn addNativeTests(
         package_test_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
     }
     const package_tests = b.addTest(.{ .root_module = package_test_mod });
-    const run_package_tests = b.addRunArtifact(package_tests);
     test_compile_step.dependOn(&package_tests.step);
-    test_step.dependOn(&run_package_tests.step);
+    test_step.dependOn(runArtifactStep(
+        b,
+        package_tests,
+        target,
+        linkage,
+        provenance,
+        libraries,
+    ));
 
     const concurrency_options = makeOptions(b, linkage, include_dir, checked, true, legacy, legacy_rsa);
     const concurrency_mod = b.createModule(.{
@@ -632,9 +656,15 @@ fn addNativeTests(
         concurrency_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
     }
     const concurrency = b.addTest(.{ .root_module = concurrency_mod });
-    const run_concurrency = b.addRunArtifact(concurrency);
     test_compile_step.dependOn(&concurrency.step);
-    test_step.dependOn(&run_concurrency.step);
+    test_step.dependOn(runArtifactStep(
+        b,
+        concurrency,
+        target,
+        linkage,
+        provenance,
+        libraries,
+    ));
 
     if (linkage == .dynamic) {
         const mismatch_options = makeOptions(b, .dynamic, include_dir, checked, false, legacy, legacy_rsa);
@@ -647,9 +677,15 @@ fn addNativeTests(
         configureHeaders(mismatch_mod, include_dir, system_include_dirs, checked, mismatch_options);
         for (symcrypt.link_objects.items) |object| mismatch_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
         const mismatch = b.addTest(.{ .root_module = mismatch_mod });
-        const run_mismatch = b.addRunArtifact(mismatch);
         test_compile_step.dependOn(&mismatch.step);
-        test_step.dependOn(&run_mismatch.step);
+        test_step.dependOn(runArtifactStep(
+            b,
+            mismatch,
+            target,
+            linkage,
+            provenance,
+            libraries,
+        ));
 
         const api_mismatch_options = makeOptions(b, .dynamic, include_dir, checked, false, legacy, legacy_rsa);
         const api_mismatch_mod = b.createModule(.{
@@ -661,10 +697,48 @@ fn addNativeTests(
         configureHeaders(api_mismatch_mod, include_dir, system_include_dirs, checked, api_mismatch_options);
         for (symcrypt.link_objects.items) |object| api_mismatch_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
         const api_mismatch = b.addTest(.{ .root_module = api_mismatch_mod });
-        const run_api_mismatch = b.addRunArtifact(api_mismatch);
         test_compile_step.dependOn(&api_mismatch.step);
-        test_step.dependOn(&run_api_mismatch.step);
+        test_step.dependOn(runArtifactStep(
+            b,
+            api_mismatch,
+            target,
+            linkage,
+            provenance,
+            libraries,
+        ));
     }
+}
+
+fn runArtifactStep(
+    b: *std.Build,
+    artifact: *std.Build.Step.Compile,
+    target: std.Build.ResolvedTarget,
+    linkage: Linkage,
+    provenance: ?std.Build.LazyPath,
+    libraries: []const std.Build.LazyPath,
+) *std.Build.Step {
+    if (target.result.os.tag != .windows or linkage != .dynamic) {
+        return &b.addRunArtifact(artifact).step;
+    }
+    const manifest = provenance orelse {
+        const fail = b.addFail(
+            "dynamic Windows execution requires -Dsymcrypt_provenance so the exact runtime DLL is verified and staged beside every executable",
+        );
+        return &fail.step;
+    };
+    const command = b.addSystemCommand(&.{
+        "python3",
+        "tools/run_verified.py",
+        "--manifest",
+    });
+    command.addFileArg(manifest);
+    command.addArgs(&.{ "--target", canonicalTargetTriple(b, target) });
+    for (libraries) |library| {
+        command.addArg("--library");
+        command.addFileArg(library);
+    }
+    command.addArtifactArg(artifact);
+    return &command.step;
 }
 
 fn addConsumerExample(
@@ -677,6 +751,7 @@ fn addConsumerExample(
     checked: bool,
     legacy: bool,
     legacy_rsa: bool,
+    provenance: ?std.Build.LazyPath,
     step: *std.Build.Step,
 ) void {
     const command = b.addSystemCommand(&.{
@@ -699,6 +774,10 @@ fn addConsumerExample(
         "--legacy-rsa",
         if (legacy_rsa) "true" else "false",
     });
+    if (provenance) |manifest| {
+        command.addArg("--provenance");
+        command.addFileArg(manifest);
+    }
     for (libraries) |library| {
         command.addArg("--library");
         command.addFileArg(library);

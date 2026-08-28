@@ -32,6 +32,16 @@ if (-not $installation) {
 $developerArchitecture = if ($Architecture -eq "x86_64") { "amd64" } else { "arm64" }
 . (Join-Path $installation "Common7/Tools/Launch-VsDevShell.ps1") `
     -Arch $developerArchitecture -SkipAutomaticLocation
+$installationVersion = & $vswhere -latest -products * `
+    -requires $toolComponent `
+    -property installationVersion
+$compilerPath = (Get-Command cl.exe -CommandType Application).Source
+$compilerInfo = (Get-Item $compilerPath).VersionInfo
+$compilerProducer = $compilerInfo.ProductName
+$compilerVersion = $compilerInfo.FileVersion
+if (-not $compilerProducer -or -not $compilerVersion -or -not $env:VCToolsVersion) {
+    throw "MSVC compiler identity metadata is incomplete"
+}
 
 if ((git -C $Source rev-parse "HEAD^{commit}") -ne $expected) {
     throw "expected SymCrypt commit $expected"
@@ -117,6 +127,10 @@ foreach ($path in $paths.Values) {
         throw "missing expected $target SymCrypt artifact: $path"
     }
 }
+$runtimeInfo = (Get-Item $paths.Dll).VersionInfo
+if (-not $runtimeInfo.FileVersion -or -not $runtimeInfo.ProductVersion) {
+    throw "SymCrypt runtime DLL version resource metadata is incomplete"
+}
 
 New-Item -ItemType Directory -Force -Path $Output | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Output "dll") | Out-Null
@@ -134,6 +148,18 @@ python (Join-Path $PSScriptRoot "fixture_manifest.py") create `
     --build-option "config=Release" `
     --build-option "spectre=false (hosted runner lacks Spectre libraries; CI fixture only)" `
     --build-option "dynamic-name=$dynamicName" `
+    --runtime-library "$(Join-Path $Output "dll/$dynamicName.dll")" `
+    --runtime-file-version "$($runtimeInfo.FileVersion)" `
+    --runtime-product-version "$($runtimeInfo.ProductVersion)" `
+    --compiler-executable "$compilerPath" `
+    --compiler-producer "$compilerProducer" `
+    --compiler-version "$compilerVersion" `
+    --compiler-target "$target" `
+    --compiler-architecture "$Architecture" `
+    --compiler-toolchain-kind "msvc" `
+    --compiler-toolchain-version "$env:VCToolsVersion" `
+    --compiler-toolchain-installation "$installation" `
+    --compiler-toolchain-installation-version "$installationVersion" `
     --library "dynamic:plus:$(Join-Path $Output 'lib/symcrypt_plus_NoCIL.lib')" `
     --library "dynamic:core:$(Join-Path $Output "dll/$dynamicName.lib")" `
     --library "static:plus:$(Join-Path $Output 'lib/symcrypt_plus_NoCIL.lib')" `

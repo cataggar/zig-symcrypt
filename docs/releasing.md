@@ -9,6 +9,11 @@ clean tracked worktree, and tag `v0.1.0`. It depends on format, package
 extraction, staged consumer example, ABI, linkage, initialization, and complete
 safe-wrapper tests. The GitHub release workflow runs the full four-target,
 two-linkage, two-optimization matrix before creating or uploading any archive.
+The command removes stale final release outputs before validation, stages the
+archive and checksum in one directory, and atomically renames that directory
+into place only after all gates and both files succeed. Negative CI invokes the
+actual build step with altered provenance and with an induced post-archive
+failure, then asserts that no final or temporary artifact remains.
 
 ## SymCrypt upgrade checklist
 
@@ -27,7 +32,11 @@ two-linkage, two-optimization matrix before creating or uploading any archive.
    fault injection, wiping, initialization mismatch, and concurrency tests for
    both linkage modes on all four native targets.
 5. Rebuild immutable fixtures, regenerate their SHA-256 provenance manifests,
-   and review the exact dynamic/static library lists and system dependencies.
+   and review the exact dynamic/static library lists, actual compiler
+   executable/producer/version/target, toolchain installation metadata, and
+   system dependencies. On Windows, verify the separately typed
+   `symcrypt_zig_103_13.dll` record, its PE architecture/version/hash, and its
+   exact import-library relationship.
    Linux uses upstream `scripts/build.py cmake`; Windows builds the pinned
    user-mode module and `symcrypt_plus` MSBuild projects, not unrelated
    kernel/WDK projects.

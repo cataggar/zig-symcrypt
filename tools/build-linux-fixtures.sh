@@ -116,6 +116,30 @@ readelf -d "$shared" | grep -F '(SONAME)' | grep -F 'libsymcrypt.so.103' >/dev/n
     exit 1
 }
 
+compiler_cache=$(sed -n 's/^CMAKE_C_COMPILER:FILEPATH=//p' "$output_dir/CMakeCache.txt")
+[ -n "$compiler_cache" ] || {
+    echo "CMake did not record the C compiler executable" >&2
+    exit 1
+}
+compiler=$(readlink -f "$compiler_cache")
+compiler_metadata=$(find "$output_dir/CMakeFiles" -name CMakeCCompiler.cmake -print -quit)
+[ -n "$compiler_metadata" ] || {
+    echo "CMake did not emit C compiler identity metadata" >&2
+    exit 1
+}
+compiler_producer=$(sed -n 's/^set(CMAKE_C_COMPILER_ID "\(.*\)")/\1/p' "$compiler_metadata")
+compiler_version=$(sed -n 's/^set(CMAKE_C_COMPILER_VERSION "\(.*\)")/\1/p' "$compiler_metadata")
+compiler_target=$("$compiler" -dumpmachine)
+case "$compiler_producer" in
+    GNU) compiler_kind=gcc ;;
+    Clang|AppleClang) compiler_kind=clang ;;
+    *)
+        echo "unsupported CMake C compiler producer '$compiler_producer'" >&2
+        exit 1
+        ;;
+esac
+compiler_installation=$(dirname "$(dirname "$compiler")")
+
 python3 "$(dirname "$0")/fixture_manifest.py" create \
     --root "$output_dir" \
     --source "$source_dir" \
@@ -124,6 +148,14 @@ python3 "$(dirname "$0")/fixture_manifest.py" create \
     --build-option "config=Release" \
     --build-option "fips=upstream-default" \
     --build-option "fips-postprocess=upstream-default" \
+    --compiler-executable "$compiler" \
+    --compiler-producer "$compiler_producer" \
+    --compiler-version "$compiler_version" \
+    --compiler-target "$compiler_target" \
+    --compiler-architecture "$requested_arch" \
+    --compiler-toolchain-kind "$compiler_kind" \
+    --compiler-toolchain-version "$compiler_version" \
+    --compiler-toolchain-installation "$compiler_installation" \
     --library "dynamic:plus:$static_plus" \
     --library "dynamic:core:$shared" \
     --library "static:plus:$static_plus" \

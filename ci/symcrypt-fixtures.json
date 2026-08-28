@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "repository": "https://github.com/microsoft/SymCrypt.git",
   "tag": "v103.13.0",
   "commit": "286762b7730e2b780678f5ab11fef2b1bad639e0",
