@@ -10,8 +10,8 @@ shipping translated bindings, and never uses `dlopen` or `LoadLibrary`.
 |---|---|
 | `x86_64-linux-gnu` | compile, dynamic/static link, and native execution validated in CI |
 | `aarch64-linux-gnu` | compile, dynamic/static link, and native execution validated in CI |
-| `x86_64-windows-msvc` | compile supported; execute on Windows fixture |
-| `aarch64-windows-msvc` | compile supported; native ARM64 execution is a release gate |
+| `x86_64-windows-msvc` | compile, dynamic/static link, and native execution validated in CI |
+| `aarch64-windows-msvc` | compile, dynamic/static link, and native execution validated in CI |
 
 Other targets fail during build with the supported triples. Linux musl and
 Windows GNU are intentionally rejected.
@@ -64,12 +64,11 @@ zig build abi -Dheaders_only=true
 `abi-local` checks Linux targets and also checks Windows when a native Windows
 SDK or explicit `symcrypt_system_include_dirs` are available. `abi` is the full
 release gate and fails rather than skipping Windows when the SDK inputs are
-absent. GitHub Actions runs that full ABI gate on Windows, executes dynamic and
-static tests on Windows x86_64, and compile-links both test sets for Windows
-ARM64. Linux Actions jobs build the exact pinned upstream commit and execute the
-complete dynamic and static test paths, including isolated concurrent first
-initialization, on native x86_64 and ARM64 runners. Native Windows ARM64
-execution remains a release gate on an ARM64 runner.
+absent. GitHub Actions builds the exact pinned upstream commit and executes the
+same complete safe-wrapper suite in Debug and ReleaseSafe for dynamic and
+static linkage on native Linux and Windows x86_64/Arm64 runners. It also runs
+isolated mismatch and concurrent-first-initialization processes, fixture
+provenance, package, formatter, diagnostics, and consumer-example gates.
 
 For command-line use, repeat the path option to preserve archive order:
 
@@ -90,13 +89,22 @@ import `symcrypt.lib`, never the DLL. Static mode takes
 `symcrypt_plus_NoCIL.lib` followed by `symcrypt_static_NoCIL.lib`. Windows builds require native
 MSVC/SDK discovery. Linux dynamic deployments must make the matching SONAME
 reachable through normal loader paths or an application-owned rpath. Put
-`symcrypt.dll` beside the Windows executable or on its documented DLL search
-path. This package does not copy binaries or mutate loader configuration.
+the exact pinned `symcrypt_zig_103_13.dll` beside the Windows executable.
+Release validation records that DLL separately from its import library and
+stages a hash- and architecture-verified copy beside every executed test or
+consumer, so `PATH` cannot select an unverified inbox/substitute DLL. This
+package does not install binaries or mutate system loader configuration.
 
 Maintainers can build native Linux fixtures with
 `tools/build-linux-fixtures.sh SOURCE OUTPUT x86_64` or `aarch64`. The script
 fails unless the native host matches the requested architecture and the source,
-tag, version, and emitted ELF artifacts match the 103.13.0 pin.
+tag, version, Jitterentropy gitlink, and emitted ELF artifacts match the
+103.13.0 pin. It emits `provenance.json` containing the exact ordered library
+roles, architecture, and SHA-256 hashes, plus the actual compiler executable,
+producer/version, target, and toolchain installation metadata. Windows
+manifests additionally bind the exact PE runtime DLL, version resources, and
+related import library. Pass that file to
+`zig build abi-release-gate -Dsymcrypt_provenance=...`.
 
 ## Cryptographic primitives
 
@@ -257,7 +265,23 @@ APIs.
 See the generic `examples/initialize.zig`, linkage-specific
 `initialize_dynamic.zig`/`initialize_static.zig`, and
 `examples/symmetric.zig`, `examples/asymmetric.zig`, and
-`test/fixtures/README.md`.
+`test/fixtures/README.md`. `examples/dynamic` and `examples/static` are
+independent package consumers that are built from the extracted release
+allow-list in CI.
+
+## Release and policy documentation
+
+- [Supported native target matrix](docs/supported-targets.md)
+- [Exact local library lists and loader behavior](docs/linking.md)
+- [Initialization and version compatibility](docs/initialization.md)
+- [FIPS boundary and limitations](docs/fips.md)
+- [Test coverage](docs/test-coverage.md)
+- [Fail-closed release and SymCrypt upgrade checklist](docs/releasing.md)
+
+Release archives are source-only and contain no SymCrypt binaries. The release
+workflow cannot create or upload an archive until every native target/linkage,
+security, ABI/provenance, package, formatter, legacy-gate, and example job has
+succeeded for the same commit.
 
 ## Asymmetric cryptography
 

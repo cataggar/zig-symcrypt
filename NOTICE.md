@@ -17,3 +17,8 @@ of the header remains upstream-identical.
 The bundled upstream license and notice are in
 `vendor/symcrypt/LICENSE.txt` and `vendor/symcrypt/NOTICE.txt`. SymCrypt is
 Copyright Microsoft Corporation and licensed under the MIT License.
+
+`vendor/symcrypt/NOTICE.txt` is the complete, unmodified notice from that exact
+commit. It includes the FreeBSD `elfdefinitions.h` notice, the Jitterentropy
+notice, and the post-quantum KAT test-vector notice. The wrapper itself is
+licensed under the root `LICENSE`.

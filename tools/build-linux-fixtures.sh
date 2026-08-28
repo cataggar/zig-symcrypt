@@ -14,11 +14,13 @@ expected_tag=v103.13.0
 
 case "$requested_arch" in
     x86_64)
-        cmake_arch=AMD64
+        upstream_arch=amd64
+        target=x86_64-linux-gnu
         elf_machine="Advanced Micro Devices X86-64"
         ;;
     aarch64)
-        cmake_arch=ARM64
+        upstream_arch=arm64
+        target=aarch64-linux-gnu
         elf_machine=AArch64
         ;;
     *)
@@ -66,6 +68,19 @@ tag_commit=$(git -C "$source_dir" rev-parse "refs/tags/$expected_tag^{commit}") 
     echo "SymCrypt source has tracked modifications before fixture build" >&2
     exit 1
 }
+gitlink_line=$(git -C "$source_dir" ls-tree HEAD 3rdparty/jitterentropy-library)
+set -- $gitlink_line
+jitterentropy=${3:-missing}
+[ "$jitterentropy" = "887c9871ea110e397812ff7f3b28a6269f0a2ffc" ] || {
+    echo "unexpected Jitterentropy gitlink: $jitterentropy" >&2
+    exit 1
+}
+initialized=$(git -C "$source_dir/3rdparty/jitterentropy-library" rev-parse HEAD 2>/dev/null || true)
+[ "$initialized" = "$jitterentropy" ] || {
+    echo "initialize only the pinned 3rdparty/jitterentropy-library submodule before building" >&2
+    exit 1
+}
+mkdir -p "$(dirname "$output_dir")"
 python3 - "$source_dir/version.json" <<'PY'
 import json
 import pathlib
@@ -76,14 +91,10 @@ if version != {"major": 103, "minor": 13, "patch": 0}:
     raise SystemExit(f"expected SymCrypt version 103.13.0, found {version!r}")
 PY
 
-cmake -S "$source_dir" -B "$output_dir" -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DSYMCRYPT_TARGET_ARCH="$cmake_arch" \
-    -DSYMCRYPT_UNIT_TESTS=OFF \
-    -DSYMCRYPT_FIPS_BUILD=OFF \
-    -DSYMCRYPT_FIPS_POSTPROCESS=OFF \
-    -DSYMCRYPT_STRIP_BINARY=OFF
-cmake --build "$output_dir" --parallel
+python3 "$source_dir/scripts/build.py" cmake "$output_dir" \
+    --arch "$upstream_arch" \
+    --config Release \
+    --clean
 
 shared=$output_dir/module/generic/libsymcrypt.so
 static_environment=$output_dir/lib/libsymcrypt_posixusermode.a
@@ -105,8 +116,56 @@ readelf -d "$shared" | grep -F '(SONAME)' | grep -F 'libsymcrypt.so.103' >/dev/n
     exit 1
 }
 
+compiler_cache=$(sed -n 's/^CMAKE_C_COMPILER:FILEPATH=//p' "$output_dir/CMakeCache.txt")
+[ -n "$compiler_cache" ] || {
+    echo "CMake did not record the C compiler executable" >&2
+    exit 1
+}
+compiler=$(readlink -f "$compiler_cache")
+compiler_metadata=$(find "$output_dir/CMakeFiles" -name CMakeCCompiler.cmake -print -quit)
+[ -n "$compiler_metadata" ] || {
+    echo "CMake did not emit C compiler identity metadata" >&2
+    exit 1
+}
+compiler_producer=$(sed -n 's/^set(CMAKE_C_COMPILER_ID "\(.*\)")/\1/p' "$compiler_metadata")
+compiler_version=$(sed -n 's/^set(CMAKE_C_COMPILER_VERSION "\(.*\)")/\1/p' "$compiler_metadata")
+compiler_target=$("$compiler" -dumpmachine)
+case "$compiler_producer" in
+    GNU) compiler_kind=gcc ;;
+    Clang|AppleClang) compiler_kind=clang ;;
+    *)
+        echo "unsupported CMake C compiler producer '$compiler_producer'" >&2
+        exit 1
+        ;;
+esac
+compiler_installation=$(dirname "$(dirname "$compiler")")
+
+python3 "$(dirname "$0")/fixture_manifest.py" create \
+    --root "$output_dir" \
+    --source "$source_dir" \
+    --target "$target" \
+    --build-option "scripts/build.py cmake" \
+    --build-option "config=Release" \
+    --build-option "fips=upstream-default" \
+    --build-option "fips-postprocess=upstream-default" \
+    --compiler-executable "$compiler" \
+    --compiler-producer "$compiler_producer" \
+    --compiler-version "$compiler_version" \
+    --compiler-target "$compiler_target" \
+    --compiler-architecture "$requested_arch" \
+    --compiler-toolchain-kind "$compiler_kind" \
+    --compiler-toolchain-version "$compiler_version" \
+    --compiler-toolchain-installation "$compiler_installation" \
+    --library "dynamic:plus:$static_plus" \
+    --library "dynamic:core:$shared" \
+    --library "static:plus:$static_plus" \
+    --library "static:environment:$static_environment" \
+    --library "static:common:$static_common" \
+    --library "static:mlkem:$static_mlkem"
+
 echo "architecture: $requested_arch"
 echo "source: $expected_tag ($expected)"
+echo "provenance: $output_dir/provenance.json"
 echo "shared: $shared"
 echo "static archives (preserve this order):"
 echo "  $static_plus"

@@ -2,6 +2,7 @@ const std = @import("std");
 const c = @import("c.zig").raw;
 const options = @import("symcrypt_options");
 const InitError = @import("errors.zig").InitError;
+const pinned = @import("symcrypt_version.zig");
 
 const State = enum(u8) {
     uninitialized,
@@ -15,6 +16,7 @@ var state: State = .uninitialized;
 var test_claimed = false;
 var test_claim_release = false;
 var test_waiters: usize = 0;
+var test_attempts: usize = 0;
 
 pub const TestHooks = struct {
     pub fn prepare() void {
@@ -23,6 +25,7 @@ pub const TestHooks = struct {
         @atomicStore(bool, &test_claimed, false, .monotonic);
         @atomicStore(bool, &test_claim_release, false, .monotonic);
         @atomicStore(usize, &test_waiters, 0, .release);
+        @atomicStore(usize, &test_attempts, 0, .release);
     }
 
     pub fn claimed() bool {
@@ -31,6 +34,10 @@ pub const TestHooks = struct {
 
     pub fn waiterCount() usize {
         return @atomicLoad(usize, &test_waiters, .acquire);
+    }
+
+    pub fn attemptCount() usize {
+        return @atomicLoad(usize, &test_attempts, .acquire);
     }
 
     pub fn releaseClaim() void {
@@ -59,7 +66,7 @@ fn testWhileInitializing() void {
 }
 
 pub fn ensureInitialized() InitError!void {
-    return initializeVersion(103, 13);
+    return initializeVersion(pinned.api, pinned.minor);
 }
 
 pub fn initializeVersion(api: u32, minor: u32) InitError!void {
@@ -79,6 +86,9 @@ pub fn initializeVersion(api: u32, minor: u32) InitError!void {
                     .monotonic,
                 ) != null) continue;
 
+                if (options.init_test_hooks) {
+                    _ = @atomicRmw(usize, &test_attempts, .Add, 1, .acq_rel);
+                }
                 testAfterClaim();
                 if (comptime std.mem.eql(u8, options.linkage, "dynamic")) {
                     const result = c.SymCryptModuleInitEx(api, minor);

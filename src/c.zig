@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const options = @import("symcrypt_options");
+const pinned = @import("symcrypt_version.zig");
 
 pub const raw = @cImport({
     if (builtin.target.os.tag == .windows) {
@@ -15,7 +16,7 @@ pub const raw = @cImport({
 });
 
 comptime {
-    const expected = .{ 103, 13, 0 };
+    const expected = .{ pinned.api, pinned.minor, pinned.patch };
     const actual = .{
         raw.SYMCRYPT_CODE_VERSION_API,
         raw.SYMCRYPT_CODE_VERSION_MINOR,
@@ -23,8 +24,8 @@ comptime {
     };
     if (actual[0] != expected[0] or actual[1] != expected[1] or actual[2] != expected[2]) {
         @compileError(std.fmt.comptimePrint(
-            "SymCrypt header version mismatch in '{s}': expected 103.13.0, found {d}.{d}.{d}",
-            .{ options.include_dir, actual[0], actual[1], actual[2] },
+            "SymCrypt header version mismatch in '{s}': expected {s}, found {d}.{d}.{d}",
+            .{ options.include_dir, pinned.string, actual[0], actual[1], actual[2] },
         ));
     }
 }

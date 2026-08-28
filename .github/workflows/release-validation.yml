@@ -1,0 +1,50 @@
+name: Release validation
+
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Format package diagnostics docs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.16.0
+      - name: Verify all immutable pins
+        run: python3 tools/check_pins.py
+      - name: Check formatter
+        run: zig build format-check
+      - name: Compile pinned FRE and checked Linux ABI
+        run: zig build abi-local -Dheaders_only=true --summary all
+      - name: Exercise precise fail-closed diagnostics
+        run: test/build_diagnostics.sh
+      - name: Verify production and test callback symbol separation
+        run: zig build callback-symbol-check
+      - name: Exercise provenance compiler and runtime tamper diagnostics
+        run: python3 tools/test_fixture_manifest.py
+      - name: Extract and rebuild package allow-list
+        run: zig build package-check
+      - name: Reject release binaries and local sibling dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! find . -type f \( -name '*.a' -o -name '*.so' -o -name '*.dll' -o \
+            -name '*.lib' -o -name '*.exe' \) -not -path './.git/*' | grep .
+          ! grep -R -n -E '(\.\./SymCrypt|\.\./rust-symcrypt)' \
+            build.zig build.zig.zon examples src test tools vendor docs ci

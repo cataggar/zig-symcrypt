@@ -19,13 +19,58 @@ pub fn validate() void {
             ));
         }
 
+        assertLayout("SYMCRYPT_MD5_STATE", c.SYMCRYPT_MD5_STATE, 112, 16);
+        assertLayout("SYMCRYPT_SHA1_STATE", c.SYMCRYPT_SHA1_STATE, 128, 16);
         assertLayout("SYMCRYPT_SHA256_STATE", c.SYMCRYPT_SHA256_STATE, 128, 16);
         assertLayout("SYMCRYPT_SHA384_STATE", c.SYMCRYPT_SHA384_STATE, 224, 16);
         assertLayout("SYMCRYPT_SHA512_STATE", c.SYMCRYPT_SHA512_STATE, 224, 16);
+        assertLayout("SYMCRYPT_SHA3_224_STATE", c.SYMCRYPT_SHA3_224_STATE, 240, 16);
+        assertLayout("SYMCRYPT_SHA3_256_STATE", c.SYMCRYPT_SHA3_256_STATE, 240, 16);
+        assertLayout("SYMCRYPT_SHA3_384_STATE", c.SYMCRYPT_SHA3_384_STATE, 240, 16);
+        assertLayout("SYMCRYPT_SHA3_512_STATE", c.SYMCRYPT_SHA3_512_STATE, 240, 16);
+
+        assertLayout("SYMCRYPT_HMAC_MD5_EXPANDED_KEY", c.SYMCRYPT_HMAC_MD5_EXPANDED_KEY, 48, 16);
+        assertLayout("SYMCRYPT_HMAC_MD5_STATE", c.SYMCRYPT_HMAC_MD5_STATE, 128, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA1_EXPANDED_KEY", c.SYMCRYPT_HMAC_SHA1_EXPANDED_KEY, 80, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA1_STATE", c.SYMCRYPT_HMAC_SHA1_STATE, 144, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA256_EXPANDED_KEY", c.SYMCRYPT_HMAC_SHA256_EXPANDED_KEY, 80, 16);
         assertLayout("SYMCRYPT_HMAC_SHA256_STATE", c.SYMCRYPT_HMAC_SHA256_STATE, 144, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA384_EXPANDED_KEY", c.SYMCRYPT_HMAC_SHA384_EXPANDED_KEY, 144, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA384_STATE", c.SYMCRYPT_HMAC_SHA384_STATE, 240, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA512_EXPANDED_KEY", c.SYMCRYPT_HMAC_SHA512_EXPANDED_KEY, 144, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA512_STATE", c.SYMCRYPT_HMAC_SHA512_STATE, 240, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA3_224_EXPANDED_KEY", c.SYMCRYPT_HMAC_SHA3_224_EXPANDED_KEY, 512, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA3_224_STATE", c.SYMCRYPT_HMAC_SHA3_224_STATE, 272, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA3_256_EXPANDED_KEY", c.SYMCRYPT_HMAC_SHA3_256_EXPANDED_KEY, 512, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA3_256_STATE", c.SYMCRYPT_HMAC_SHA3_256_STATE, 272, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA3_384_EXPANDED_KEY", c.SYMCRYPT_HMAC_SHA3_384_EXPANDED_KEY, 512, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA3_384_STATE", c.SYMCRYPT_HMAC_SHA3_384_STATE, 272, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA3_512_EXPANDED_KEY", c.SYMCRYPT_HMAC_SHA3_512_EXPANDED_KEY, 512, 16);
+        assertLayout("SYMCRYPT_HMAC_SHA3_512_STATE", c.SYMCRYPT_HMAC_SHA3_512_STATE, 272, 16);
+
         assertLayout("SYMCRYPT_AES_EXPANDED_KEY", c.SYMCRYPT_AES_EXPANDED_KEY, 496, 16);
         assertLayout("SYMCRYPT_GCM_EXPANDED_KEY", c.SYMCRYPT_GCM_EXPANDED_KEY, 2608, 16);
         assertLayout("SYMCRYPT_GCM_STATE", c.SYMCRYPT_GCM_STATE, 112, 16);
+        assertLayout("SYMCRYPT_RSA_PARAMS", c.SYMCRYPT_RSA_PARAMS, 16, 4);
+        assertOffset("SYMCRYPT_RSA_PARAMS.version", c.SYMCRYPT_RSA_PARAMS, "version", 0);
+        assertOffset("SYMCRYPT_RSA_PARAMS.nBitsOfModulus", c.SYMCRYPT_RSA_PARAMS, "nBitsOfModulus", 4);
+        assertOffset("SYMCRYPT_RSA_PARAMS.nPrimes", c.SYMCRYPT_RSA_PARAMS, "nPrimes", 8);
+        assertOffset("SYMCRYPT_RSA_PARAMS.nPubExp", c.SYMCRYPT_RSA_PARAMS, "nPubExp", 12);
+    }
+}
+
+fn assertOffset(
+    comptime name: []const u8,
+    comptime T: type,
+    comptime field: []const u8,
+    comptime expected: usize,
+) void {
+    const actual = @offsetOf(T, field);
+    if (actual != expected) {
+        @compileError(std.fmt.comptimePrint(
+            "{s} ABI mismatch: expected offset {d}, found {d}",
+            .{ name, expected, actual },
+        ));
     }
 }
 

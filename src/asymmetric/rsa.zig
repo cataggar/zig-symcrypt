@@ -9,6 +9,14 @@ const state_memory = @import("../internal/state.zig");
 const asymmetric = @import("../asymmetric.zig");
 const hashes = @import("hash_support.zig");
 
+const callback_testing = if (options.callback_fault_injection) struct {
+    extern fn SymCryptZigTestConsumeDeferredAllocationFailure() c.BOOLEAN;
+
+    fn consumeDeferredAllocationFailure() bool {
+        return SymCryptZigTestConsumeDeferredAllocationFailure() != 0;
+    }
+} else struct {};
+
 pub const Usage = struct {
     sign: bool = false,
     encrypt: bool = false,
@@ -108,12 +116,17 @@ pub const PrivateKey = opaque {
         const implementation = try allocateKey(allocator, modulus_bits, true, requested_usage);
         errdefer destroy(implementation);
         var exponent_storage = public_exponent orelse 0;
-        try errors.check(c.SymCryptRsakeyGenerate(
+        const result = c.SymCryptRsakeyGenerate(
             implementation.key_object,
             if (public_exponent != null) &exponent_storage else null,
             if (public_exponent != null) 1 else 0,
             try requested_usage.flags(),
-        ));
+        );
+        if (comptime options.callback_fault_injection) {
+            if (callback_testing.consumeDeferredAllocationFailure())
+                return error.MemoryAllocationFailure;
+        }
+        try errors.check(result);
         return @ptrCast(implementation);
     }
 
