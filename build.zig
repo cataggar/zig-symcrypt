@@ -6,7 +6,15 @@ const supported_targets =
     "x86_64-linux-gnu, aarch64-linux-gnu, x86_64-windows-msvc, aarch64-windows-msvc";
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
+    const default_target: std.Target.Query = if (b.graph.host.result.os.tag == .windows)
+        .{
+            .cpu_arch = b.graph.host.result.cpu.arch,
+            .os_tag = .windows,
+            .abi = .msvc,
+        }
+    else
+        .{};
+    const target = b.standardTargetOptions(.{ .default_target = default_target });
     const optimize = b.standardOptimizeOption(.{});
     const linkage = b.option(Linkage, "linkage", "SymCrypt linkage mode (dynamic or static)") orelse .dynamic;
     const libraries = b.option(
