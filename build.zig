@@ -163,6 +163,13 @@ fn configureNative(
 ) void {
     for (libraries) |library| module.addObjectFile(library);
 
+    if (target.result.os.tag == .windows and linkage == .dynamic) {
+        module.addCSourceFile(.{
+            .file = b.path("src/algorithm_accessors.c"),
+            .flags = &.{"-std=c11"},
+        });
+    }
+
     if (linkage == .static) {
         module.addCSourceFile(.{ .file = b.path("src/static_environment.c"), .flags = &.{"-std=c11"} });
         module.addCSourceFile(.{ .file = b.path("src/callbacks.c"), .flags = &.{"-std=c11"} });

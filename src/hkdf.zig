@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const options = @import("symcrypt_options");
 const c = @import("c.zig").raw;
 const initialization = @import("init.zig");
@@ -60,6 +61,14 @@ fn digestLength(algorithm: hmac.Algorithm) usize {
 }
 
 fn macAlgorithm(algorithm: hmac.Algorithm) c.PCSYMCRYPT_MAC {
+    return if (comptime builtin.target.os.tag == .windows and
+        std.mem.eql(u8, options.linkage, "dynamic"))
+        importedMacAlgorithm(algorithm)
+    else
+        linkedMacAlgorithm(algorithm);
+}
+
+fn linkedMacAlgorithm(algorithm: hmac.Algorithm) c.PCSYMCRYPT_MAC {
     const name = @tagName(algorithm);
     if (std.mem.eql(u8, name, "md5")) return c.SymCryptHmacMd5Algorithm;
     if (std.mem.eql(u8, name, "sha1")) return c.SymCryptHmacSha1Algorithm;
@@ -70,6 +79,30 @@ fn macAlgorithm(algorithm: hmac.Algorithm) c.PCSYMCRYPT_MAC {
     if (std.mem.eql(u8, name, "sha3_256")) return c.SymCryptHmacSha3_256Algorithm;
     if (std.mem.eql(u8, name, "sha3_384")) return c.SymCryptHmacSha3_384Algorithm;
     if (std.mem.eql(u8, name, "sha3_512")) return c.SymCryptHmacSha3_512Algorithm;
+    unreachable;
+}
+
+extern fn SymCryptZigHmacMd5Algorithm() c.PCSYMCRYPT_MAC;
+extern fn SymCryptZigHmacSha1Algorithm() c.PCSYMCRYPT_MAC;
+extern fn SymCryptZigHmacSha256Algorithm() c.PCSYMCRYPT_MAC;
+extern fn SymCryptZigHmacSha384Algorithm() c.PCSYMCRYPT_MAC;
+extern fn SymCryptZigHmacSha512Algorithm() c.PCSYMCRYPT_MAC;
+extern fn SymCryptZigHmacSha3_224Algorithm() c.PCSYMCRYPT_MAC;
+extern fn SymCryptZigHmacSha3_256Algorithm() c.PCSYMCRYPT_MAC;
+extern fn SymCryptZigHmacSha3_384Algorithm() c.PCSYMCRYPT_MAC;
+extern fn SymCryptZigHmacSha3_512Algorithm() c.PCSYMCRYPT_MAC;
+
+fn importedMacAlgorithm(algorithm: hmac.Algorithm) c.PCSYMCRYPT_MAC {
+    const name = @tagName(algorithm);
+    if (std.mem.eql(u8, name, "md5")) return SymCryptZigHmacMd5Algorithm();
+    if (std.mem.eql(u8, name, "sha1")) return SymCryptZigHmacSha1Algorithm();
+    if (std.mem.eql(u8, name, "sha256")) return SymCryptZigHmacSha256Algorithm();
+    if (std.mem.eql(u8, name, "sha384")) return SymCryptZigHmacSha384Algorithm();
+    if (std.mem.eql(u8, name, "sha512")) return SymCryptZigHmacSha512Algorithm();
+    if (std.mem.eql(u8, name, "sha3_224")) return SymCryptZigHmacSha3_224Algorithm();
+    if (std.mem.eql(u8, name, "sha3_256")) return SymCryptZigHmacSha3_256Algorithm();
+    if (std.mem.eql(u8, name, "sha3_384")) return SymCryptZigHmacSha3_384Algorithm();
+    if (std.mem.eql(u8, name, "sha3_512")) return SymCryptZigHmacSha3_512Algorithm();
     unreachable;
 }
 
