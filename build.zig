@@ -76,7 +76,7 @@ pub fn build(b: *std.Build) void {
             "no SymCrypt libraries supplied: pass one or more ordered -Dsymcrypt_libraries=/exact/path files, or use -Dheaders_only=true for ABI-only checks",
         );
         b.getInstallStep().dependOn(&fail.step);
-        b.step("test", "Run native initialization, hash, callback, and concurrency tests")
+        b.step("test", "Run native cryptographic, initialization, callback, and concurrency tests")
             .dependOn(&fail.step);
         b.step("test-compile", "Compile and link native test executables without running them")
             .dependOn(&fail.step);
@@ -89,7 +89,7 @@ pub fn build(b: *std.Build) void {
         return;
     }
 
-    const test_step = b.step("test", "Run native initialization, hash, callback, and concurrency tests");
+    const test_step = b.step("test", "Run native cryptographic, initialization, callback, and concurrency tests");
     const test_compile_step = b.step(
         "test-compile",
         "Compile and link native test executables without running them",
@@ -118,10 +118,23 @@ pub fn build(b: *std.Build) void {
     });
     example_mod.addImport("symcrypt", symcrypt);
     const example = b.addExecutable(.{ .name = "symcrypt-initialize", .root_module = example_mod });
-    b.step("example", "Build the minimal initialization example").dependOn(&example.step);
+    const symmetric_example_mod = b.createModule(.{
+        .root_source_file = b.path("examples/symmetric.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    symmetric_example_mod.addImport("symcrypt", symcrypt);
+    const symmetric_example = b.addExecutable(.{
+        .name = "symcrypt-symmetric",
+        .root_module = symmetric_example_mod,
+    });
+    const example_step = b.step("example", "Build initialization and symmetric examples");
+    example_step.dependOn(&example.step);
+    example_step.dependOn(&symmetric_example.step);
 
     b.getInstallStep().dependOn(abi_local_step);
     b.getInstallStep().dependOn(&example.step);
+    b.getInstallStep().dependOn(&symmetric_example.step);
 }
 
 fn makeOptions(

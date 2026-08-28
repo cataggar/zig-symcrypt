@@ -28,9 +28,35 @@ pub const random = @import("random.zig");
 pub const hash = if (options.legacy) @import("hash_legacy.zig") else @import("hash.zig");
 pub const hmac = if (options.legacy) @import("hmac_legacy.zig") else @import("hmac.zig");
 pub const hkdf = @import("hkdf.zig");
+pub const aead = @import("aead.zig");
+pub const cipher = @import("cipher.zig");
 pub const testing = if (@import("builtin").is_test) struct {
     pub fn failNextHmacCreateAfterAllocation() void {
         @import("hmac_impl.zig").testFailNextCreateAfterAllocation();
+    }
+
+    pub fn failNextAesGcmCreateAfterAllocation() void {
+        @import("aead/aes_gcm.zig").testFailNextCreateAfterAllocation();
+    }
+
+    pub fn failNextAesCreateAfterAllocation() void {
+        @import("cipher/aes.zig").testFailNextCreateAfterAllocation();
+    }
+
+    pub fn validateGcmLengths(nonce_len: u64, aad_len: u64, data_len: u64, tag_len: u64) Error!void {
+        try @import("aead/aes_gcm.zig").validateLengths(nonce_len, aad_len, data_len, tag_len);
+    }
+
+    pub fn validateChaChaLengths(key_len: u64, nonce_len: u64, data_len: u64, tag_len: u64) Error!void {
+        try @import("aead/chacha20_poly1305.zig").validateLengths(key_len, nonce_len, data_len, tag_len);
+    }
+
+    pub fn symCryptValidateGcmLengths(nonce_len: u64, aad_len: u64, data_len: u64, tag_len: u64) Error!u32 {
+        return @import("aead/aes_gcm.zig").testSymCryptValidateLengths(nonce_len, aad_len, data_len, tag_len);
+    }
+
+    pub fn checkedBufferLength(a: usize, b: usize) Error!usize {
+        return @import("internal/buffers.zig").checkedAdd(a, b);
     }
 } else struct {};
 
