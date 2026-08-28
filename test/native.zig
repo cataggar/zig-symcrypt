@@ -42,16 +42,16 @@ test "static callbacks allocate, randomize, and synchronize" {
     var first: [32]u8 = undefined;
     var second: [32]u8 = undefined;
     try std.testing.expectEqual(
-        @as(c_uint, c.SYMCRYPT_NO_ERROR),
+        @as(c.SYMCRYPT_ERROR, c.SYMCRYPT_NO_ERROR),
         c.SymCryptCallbackRandom(&first, first.len),
     );
     try std.testing.expectEqual(
-        @as(c_uint, c.SYMCRYPT_NO_ERROR),
+        @as(c.SYMCRYPT_ERROR, c.SYMCRYPT_NO_ERROR),
         c.SymCryptCallbackRandom(&second, second.len),
     );
     try std.testing.expect(!std.mem.eql(u8, &first, &second));
     try std.testing.expectEqual(
-        @as(c_uint, c.SYMCRYPT_NO_ERROR),
+        @as(c.SYMCRYPT_ERROR, c.SYMCRYPT_NO_ERROR),
         c.SymCryptCallbackRandom(null, 0),
     );
 

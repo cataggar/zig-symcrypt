@@ -79,8 +79,20 @@ jobs:
           . (Join-Path $installation "Common7/Tools/Launch-VsDevShell.ps1") `
             -Arch ${{ matrix.dev_arch }} -HostArch amd64 -SkipAutomaticLocation
 
+          # Locally built CI fixtures are non-FIPS and lack Microsoft's release post-processing.
+          $moduleProject = "SymCrypt/modules/windows/user/symcrypt.vcxproj"
+          $projectText = Get-Content -LiteralPath $moduleProject -Raw
+          $projectText = $projectText.Replace(
+            "SYMCRYPT_MODULE_DO_FIPS_SELFTESTS;",
+            "SYMCRYPT_MODULE_DO_FIPS_SELFTESTS=0;"
+          ).Replace(
+            "SYMCRYPT_MODULE_USE_FIPS_ENTROPY;",
+            "SYMCRYPT_MODULE_USE_FIPS_ENTROPY=0;"
+          )
+          Set-Content -LiteralPath $moduleProject -Value $projectText -NoNewline
+
           $solutionDir = (Resolve-Path "SymCrypt").Path + "\"
-          msbuild SymCrypt/modules/windows/user/symcrypt.vcxproj `
+          msbuild $moduleProject `
             /m /t:Rebuild `
             /p:Platform=${{ matrix.platform }} `
             /p:Configuration=Release `
