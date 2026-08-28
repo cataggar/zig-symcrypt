@@ -17,6 +17,8 @@ const Impl = struct {
     key_object: c.PSYMCRYPT_ECKEY,
 };
 
+var test_fail_after_key_allocation = false;
+
 pub const PrivateKey = opaque {
     const Self = @This();
 
@@ -101,9 +103,11 @@ pub const PublicKey = opaque {
         public_le: []const u8,
     ) (std.mem.Allocator.Error || errors.Error)!*Self {
         if (public_le.len != encoded_length) return error.InvalidLength;
+        var encoded: [encoded_length]u8 = undefined;
+        @memcpy(&encoded, public_le);
         var normalized: [encoded_length]u8 = undefined;
         defer secure_memory.wipe(&normalized);
-        normalizeUCoordinate(public_le, &normalized);
+        normalizeUCoordinate(&encoded, &normalized);
         return @ptrCast(try createPublic(allocator, &normalized));
     }
 
@@ -116,8 +120,7 @@ pub const PublicKey = opaque {
     }
 };
 
-pub fn normalizeUCoordinate(input: []const u8, output: *[encoded_length]u8) void {
-    std.debug.assert(input.len == encoded_length);
+fn normalizeUCoordinate(input: *const [encoded_length]u8, output: *[encoded_length]u8) void {
     @memcpy(output, input);
     output[31] &= 0x7f;
 
@@ -201,6 +204,12 @@ fn allocate(allocator: std.mem.Allocator) (std.mem.Allocator.Error || errors.Err
     errdefer c.SymCryptEcurveFree(implementation.curve_object);
     implementation.key_object = c.SymCryptEckeyAllocate(implementation.curve_object);
     if (implementation.key_object == null) return error.MemoryAllocationFailure;
+    if (builtin.is_test and test_fail_after_key_allocation) {
+        test_fail_after_key_allocation = false;
+        c.SymCryptEckeyFree(implementation.key_object);
+        implementation.key_object = null;
+        return error.MemoryAllocationFailure;
+    }
     return implementation;
 }
 
@@ -291,6 +300,14 @@ test "RFC 7748 X25519 known answer" {
     defer bob_secret.deinit();
     try std.testing.expectEqualSlices(u8, &shared_expected, alice_secret.bytes());
     try std.testing.expectEqualSlices(u8, alice_secret.bytes(), bob_secret.bytes());
+
+    var high_bit_public = bob_public;
+    high_bit_public[31] |= 0x80;
+    const normalized_peer = try PublicKey.import(std.testing.allocator, &high_bit_public);
+    defer normalized_peer.deinit();
+    const normalized_secret = try alice.agree(std.testing.allocator, normalized_peer);
+    defer normalized_secret.deinit();
+    try std.testing.expectEqualSlices(u8, &shared_expected, normalized_secret.bytes());
 }
 
 test "X25519 rejects low-order peers and allocation failure" {
@@ -306,4 +323,55 @@ test "X25519 rejects low-order peers and allocation failure" {
 
     var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     try std.testing.expectError(error.OutOfMemory, PrivateKey.generate(failing.allocator()));
+
+    var checking = asymmetric.testing.WipeAllocator{ .backing = std.testing.allocator };
+    test_fail_after_key_allocation = true;
+    try std.testing.expectError(error.MemoryAllocationFailure, PrivateKey.generate(checking.allocator()));
+    try std.testing.expectEqual(@as(usize, 1), checking.frees);
+    try std.testing.expectEqual(@as(usize, 0), checking.nonzero_frees);
+}
+
+test "X25519 public slice entry points reject malformed lengths" {
+    try std.testing.expectError(error.InvalidLength, PrivateKey.import(std.testing.allocator, &.{}));
+    try std.testing.expectError(error.InvalidLength, PrivateKey.import(std.testing.allocator, &([_]u8{0} ** 31)));
+    try std.testing.expectError(error.InvalidLength, PrivateKey.import(std.testing.allocator, &([_]u8{0} ** 33)));
+    try std.testing.expectError(error.InvalidLength, PublicKey.import(std.testing.allocator, &.{}));
+    try std.testing.expectError(error.InvalidLength, PublicKey.import(std.testing.allocator, &([_]u8{0} ** 31)));
+    try std.testing.expectError(error.InvalidLength, PublicKey.import(std.testing.allocator, &([_]u8{0} ** 33)));
+
+    const private = try PrivateKey.generate(std.testing.allocator);
+    defer private.deinit();
+    const public = try private.publicKey(std.testing.allocator);
+    defer public.deinit();
+    var short: [31]u8 = undefined;
+    var long: [33]u8 = undefined;
+    try std.testing.expectError(error.InvalidLength, private.exportPublic(&short));
+    try std.testing.expectError(error.InvalidLength, private.exportPublic(&long));
+    try std.testing.expectError(error.InvalidLength, public.exportPublic(&short));
+    try std.testing.expectError(error.InvalidLength, public.exportPublic(&long));
+}
+
+test "RFC 7748 iterative X25519 vectors" {
+    var base = [_]u8{0} ** 32;
+    base[0] = 9;
+    var scalar = base;
+    var coordinate = base;
+    var one_expected: [32]u8 = undefined;
+    var thousand_expected: [32]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&one_expected, "422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079");
+    _ = try std.fmt.hexToBytes(&thousand_expected, "684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51");
+
+    for (0..1000) |iteration| {
+        const private = try PrivateKey.import(std.testing.allocator, &scalar);
+        defer private.deinit();
+        const public = try PublicKey.import(std.testing.allocator, &coordinate);
+        defer public.deinit();
+        const result = try private.agree(std.testing.allocator, public);
+        defer result.deinit();
+        const previous_scalar = scalar;
+        @memcpy(&scalar, result.bytes());
+        coordinate = previous_scalar;
+        if (iteration == 0) try std.testing.expectEqualSlices(u8, &one_expected, &scalar);
+    }
+    try std.testing.expectEqualSlices(u8, &thousand_expected, &scalar);
 }

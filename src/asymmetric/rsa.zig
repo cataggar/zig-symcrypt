@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const options = @import("symcrypt_options");
 const c = @import("../c.zig").raw;
 const errors = @import("../errors.zig");
@@ -89,6 +90,8 @@ const Impl = struct {
     usage: Usage,
     has_private: bool,
 };
+
+var test_fail_after_key_allocation = false;
 
 pub const PrivateKey = opaque {
     const Self = @This();
@@ -366,6 +369,12 @@ fn allocateKey(
     };
     implementation.key_object = c.SymCryptRsakeyAllocate(&params, 0);
     if (implementation.key_object == null) return error.MemoryAllocationFailure;
+    if (builtin.is_test and test_fail_after_key_allocation) {
+        test_fail_after_key_allocation = false;
+        c.SymCryptRsakeyFree(implementation.key_object);
+        implementation.key_object = null;
+        return error.MemoryAllocationFailure;
+    }
     return implementation;
 }
 
@@ -375,6 +384,7 @@ fn validateUnsigned(value: []const u8) errors.Error!void {
 
 fn validateModulus(modulus: []const u8) errors.Error!u32 {
     try validateUnsigned(modulus);
+    if (modulus[modulus.len - 1] & 1 == 0) return error.InvalidEncoding;
     if (modulus.len > 2048) return error.InvalidLength;
     const leading = @clz(modulus[0]);
     const bits_usize = std.math.mul(usize, modulus.len - 1, 8) catch return error.InvalidLength;
@@ -552,7 +562,7 @@ fn verifyPkcs1(
             0,
             0,
         )) catch |err| switch (err) {
-            error.SignatureVerificationFailure => continue,
+            error.SignatureVerificationFailure, error.InvalidArgument => continue,
             else => return err,
         };
         return;
@@ -629,7 +639,7 @@ fn verifyPssImpl(
         salt_len,
         flags,
     )) catch |err| switch (err) {
-        error.SignatureVerificationFailure => return error.InvalidSignature,
+        error.SignatureVerificationFailure, error.InvalidArgument => return error.InvalidSignature,
         else => return err,
     };
 }
@@ -908,10 +918,19 @@ test "generated RSA signing, OAEP, exports, and restrictions" {
     try imported_d.verifyPkcs1v15(.sha256, &digest, &pkcs1);
     pkcs1[0] ^= 1;
     try std.testing.expectError(error.InvalidSignature, public.verifyPkcs1v15(.sha256, &digest, &pkcs1));
+    const out_of_range_signature = [_]u8{0xff} ** 256;
+    try std.testing.expectError(
+        error.InvalidSignature,
+        public.verifyPkcs1v15(.sha256, &digest, &out_of_range_signature),
+    );
 
     var pss: [256]u8 = undefined;
     try key.signPss(.sha256, &digest, digest.len, &pss);
     try public.verifyPss(.sha256, &digest, .digest_length, &pss);
+    try std.testing.expectError(
+        error.InvalidSignature,
+        public.verifyPss(.sha256, &digest, .digest_length, &out_of_range_signature),
+    );
     try std.testing.expectError(error.InvalidSignature, public.verifyPss(.sha256, &digest, .{ .exact = 0 }, &pss));
 
     var ciphertext: [256]u8 = undefined;
@@ -921,6 +940,30 @@ test "generated RSA signing, OAEP, exports, and restrictions" {
     try std.testing.expectEqualStrings("message", plaintext[0..plaintext_len]);
     @memset(&plaintext, 0xa5);
     if (key.decryptOaep(.sha256, &ciphertext, "wrong", &plaintext)) |_| {
+        return error.TestExpectedError;
+    } else |_| {}
+    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &plaintext);
+    const wrong_key = try PrivateKey.generate(std.testing.allocator, 2048, null, .signing_and_encryption);
+    defer wrong_key.deinit();
+    const wrong_public = try wrong_key.publicKey(std.testing.allocator);
+    defer wrong_public.deinit();
+    try key.signPkcs1v15(.sha256, &digest, &pkcs1);
+    try std.testing.expectError(
+        error.InvalidSignature,
+        wrong_public.verifyPkcs1v15(.sha256, &digest, &pkcs1),
+    );
+    try std.testing.expectError(
+        error.InvalidSignature,
+        wrong_public.verifyPss(.sha256, &digest, .digest_length, &pss),
+    );
+    @memset(&plaintext, 0xa5);
+    if (wrong_key.decryptOaep(.sha256, &ciphertext, "label", &plaintext)) |_| {
+        return error.TestExpectedError;
+    } else |_| {}
+    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &plaintext);
+    const out_of_range_ciphertext = [_]u8{0xff} ** 256;
+    @memset(&plaintext, 0xa5);
+    if (key.decryptOaep(.sha256, &out_of_range_ciphertext, "label", &plaintext)) |_| {
         return error.TestExpectedError;
     } else |_| {}
     try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &plaintext);
@@ -958,11 +1001,44 @@ test "RSA validation and allocator failures are fail closed" {
         error.InvalidEncoding,
         PublicKey.import(std.testing.allocator, &leading_zero, 65537, .signing),
     );
+    var even_modulus = [_]u8{0xff} ** 256;
+    even_modulus[255] = 0xfe;
+    var no_allocation = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    try std.testing.expectError(
+        error.InvalidEncoding,
+        PublicKey.import(no_allocation.allocator(), &even_modulus, 65537, .signing),
+    );
+    try std.testing.expectError(
+        error.InvalidEncoding,
+        PrivateKey.importPrimes(no_allocation.allocator(), .{
+            .modulus_be = &even_modulus,
+            .public_exponent = 65537,
+            .p_be = &.{3},
+            .q_be = &.{5},
+        }, .signing),
+    );
+    try std.testing.expectError(
+        error.InvalidEncoding,
+        PrivateKey.importPrivateExponent(no_allocation.allocator(), .{
+            .modulus_be = &even_modulus,
+            .public_exponent = 65537,
+            .d_be = &.{3},
+        }, .signing),
+    );
     var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     try std.testing.expectError(
         error.OutOfMemory,
         PrivateKey.generate(failing.allocator(), 2048, null, .signing),
     );
+
+    var checking = asymmetric.testing.WipeAllocator{ .backing = std.testing.allocator };
+    test_fail_after_key_allocation = true;
+    try std.testing.expectError(
+        error.MemoryAllocationFailure,
+        PrivateKey.generate(checking.allocator(), 2048, null, .signing),
+    );
+    try std.testing.expectEqual(@as(usize, 1), checking.frees);
+    try std.testing.expectEqual(@as(usize, 0), checking.nonzero_frees);
 }
 
 test "pinned 2048-bit SHA-256 RSA PKCS1 known answer" {
@@ -970,14 +1046,19 @@ test "pinned 2048-bit SHA-256 RSA PKCS1 known answer" {
     var private_exponent: [256]u8 = undefined;
     var digest: [32]u8 = undefined;
     var expected_signature: [256]u8 = undefined;
+    var pss_digest: [32]u8 = undefined;
+    var pss_signature: [256]u8 = undefined;
     _ = try std.fmt.hexToBytes(&modulus, "d18fb8613ff74ebbcd0d9e3d8c57d7475e2287f11200bc99876e7988775a17fb8524ae13760ebd0274d0547d3fc36675bab4c7131102972eb5dab50bbcc14f96fac3aceb955b8a054cff1712b0338bab5d1c29e6616b6d544c049d7632b86b49b8f288f755d57fdcf6ff280d3ec87b91ba00baa388c738fd3ed05d3574d28e0ce2cd816c05f3cfb18d242c3edef14b7283368ddf7abd75da06eda02b27177c82969aae6e38b2057da93c307e0382740fe0b7f2dfd7490ef8ddf282aa50c885683a886d86b2aa9f3c65599474fdda354eaa790af0c99e964db9021f934c6289dabd9d1608803e57d2aa230fb6587f1dd8e592485fcd9b7effc6a4c48e89922f25");
     _ = try std.fmt.hexToBytes(&private_exponent, "56ae16b99eb56ce1e665b395c9ac7d06ebc12af2abfc23a6c3c36e7a119068ac53e48d3badc011e6f449834dd1661d47d7c379de653321df89b56ce82d39ef5efbbcd6ff71a3498d97619189d511a53bbdd65eab384dd84a41a00aa9e7c9525348fde337b720ee2943f5f691f14cc6a791922a5775eb7f690f9e3169a4b3f650d396eb296bcc8e27c4c65a444ddd15632bba75bdc5da294b58fd724d2f87f2ab73986f840f833dc1ded559b4e801723b5e0d597f06f798af111ccdaf7a6348d7033a07b18537863f34dbd7fd15841d44f3d08cb8c1d779a84787c185bb1d98595504f48318189602930ed058be85b86b20ad28bef756f06bba04ec92520278cd");
     _ = try std.fmt.hexToBytes(&digest, "685663873e404bbc28237cac8920572aa683a0f38fe8ec65e94611a9115acfd1");
     _ = try std.fmt.hexToBytes(&expected_signature, "1ecf305ee05e8eb077d046c5e32267771d612b0e820a8166fee16a11e4e9c3c65342151a1e41cd185a04d2b334658ead4f1f098c1b1512e7fb27554ede15ef971ad90d3c728c872643e1838b39395b105cc173abd06a7b716dbb80d4328f04db5b752103a182e0616fc26eb95d95833c56d70bae0f4c84b99f609077cb56cb86908599384767541b0b69bcfc2b9ed5ffd199e303bddae2055652ebeff6a0c27b3b32f9029a5a962bbcfad290bb2db51ad8437bbdfc0fca843f8481015f8acc729c115196786cf929a35e58761cf6a4782090b3dc1ea26fdf36d2a79ec3b3b223032eb376d63d7e00e5ae45382c6426324a7ee04b57026ec72c9f3045dffe4da0");
+    _ = try std.fmt.hexToBytes(&pss_digest, "77749d2cd74a7f195b6aad85824fc0c5b476ed23ec9c584a3befb09d4a095369");
+    _ = try std.fmt.hexToBytes(&pss_signature, "6807bfc1c1ec4f260340b35d9ae644e4ccd840a50875b8b53c1ad7baca723d77098c23feee69b03879e44f7407db742242eb57c231ab52dd7f7b7ca8c12f09d17b6b260240521bafba6880e84f8b275e8aa3bbdfab614711e51fba4b40f2cb9b002d2a66b1fbcb174d7fa5f335b7bafd0a49286f1f62212ba8e5660c4e2b9d6eab07dca14be78da9aed6ebdf7833a9b287e2152c828052a6f67e5a5ed9890f0a9819554cc8f88c72aee69b9794fb7a81bb598f7aa946581339b3025cd93f5c85aab2309d48899b5876ff5ed81b6d02bf93835331a39de45d24f7fe4112f1e44dc44457b6e9e0816c4d755d1b699b332d2d125ec13b23df1014d92869a23760aa");
     const exponent: u64 = 0x38ef1586f9;
     const public = try PublicKey.import(std.testing.allocator, &modulus, exponent, .signing);
     defer public.deinit();
     try public.verifyPkcs1v15(.sha256, &digest, &expected_signature);
+    try public.verifyPss(.sha256, &pss_digest, .{ .exact = 32 }, &pss_signature);
 
     const private = try PrivateKey.importPrivateExponent(std.testing.allocator, .{
         .modulus_be = &modulus,
@@ -988,4 +1069,64 @@ test "pinned 2048-bit SHA-256 RSA PKCS1 known answer" {
     var actual_signature: [256]u8 = undefined;
     try private.signPkcs1v15(.sha256, &digest, &actual_signature);
     try std.testing.expectEqualSlices(u8, &expected_signature, &actual_signature);
+}
+
+fn runRsaAlgorithmMatrix(
+    key: *const PrivateKey,
+    public: *const PublicKey,
+    comptime algorithm: hashes.Algorithm,
+) !void {
+    const hash = if (options.legacy) @import("../hash_legacy.zig") else @import("../hash.zig");
+    const digest = try hash.digest(algorithm, "RSA algorithm matrix");
+    const modulus_len = key.modulusLength();
+    const signature = try std.testing.allocator.alloc(u8, modulus_len);
+    defer std.testing.allocator.free(signature);
+    try key.signPkcs1v15(algorithm, &digest, signature);
+    try public.verifyPkcs1v15(algorithm, &digest, signature);
+    try key.signPss(algorithm, &digest, digest.len, signature);
+    try public.verifyPss(algorithm, &digest, .digest_length, signature);
+
+    const ciphertext = try std.testing.allocator.alloc(u8, modulus_len);
+    defer std.testing.allocator.free(ciphertext);
+    try public.encryptOaep(algorithm, "matrix message", "matrix label", ciphertext);
+    var plaintext: [32]u8 = undefined;
+    const plaintext_len = try key.decryptOaep(algorithm, ciphertext, "matrix label", &plaintext);
+    try std.testing.expectEqualStrings("matrix message", plaintext[0..plaintext_len]);
+}
+
+test "RSA 2048 3072 4096 and advertised modern hash matrix" {
+    inline for (.{
+        .{ 2048, hashes.Algorithm.sha256, hashes.Algorithm.sha3_256 },
+        .{ 3072, hashes.Algorithm.sha384, hashes.Algorithm.sha3_384 },
+        .{ 4096, hashes.Algorithm.sha512, hashes.Algorithm.sha3_512 },
+    }) |case| {
+        const key = try PrivateKey.generate(std.testing.allocator, case[0], null, .signing_and_encryption);
+        defer key.deinit();
+        const public = try key.publicKey(std.testing.allocator);
+        defer public.deinit();
+        try runRsaAlgorithmMatrix(key, public, case[1]);
+        try runRsaAlgorithmMatrix(key, public, case[2]);
+    }
+}
+
+test "pinned 2048-bit SHA-256 RSA OAEP known answer" {
+    var modulus: [256]u8 = undefined;
+    var private_exponent: [256]u8 = undefined;
+    var message: [85]u8 = undefined;
+    var label: [895]u8 = undefined;
+    var ciphertext: [256]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&modulus, "ad120f90d7ac1bfb6248a99eff0ca41cd95fcafe1df148b2af62387ba5f1fbb41edb2182cddf5fda66a22ffad709b68ac4356b8f2fc350e8e9cd96fbaea441439374f37e870519ce6594ec8677baa9d96a300a9fdf3aecd3587cf85d0f743ce671f30d1ad86a5fe6b69e430c41bcca624e183ddb69f382dfaf7df16f9ee7a3d8924882d921932cc9edb4b63bb15cc493f0bad8c69a3c0916a7c477dca294d39e777e0048feed1b9f1e7e8ac9962b19fcebfa644513c8012ba7ac328a1a7747e88ae61eff95949dec3e11b5635a04fa29de0f3df09b7ff324352083fb125b88e7689ee08dff05a5e9ebf3a820a8a47125646e061273c69ec77bed72bf6b831b3d");
+    _ = try std.fmt.hexToBytes(&private_exponent, "28b097c5bfb18ef4fd667973cb42e7ee65fcbc901f6e33d6534f5e33ee14bb179e52d6588cbb19d484278db400c1d79ab17ffe2d579d174f9526b17a7d1b0505ebad852bf69519e5c3e990431ba08880bb1e665c51148211781cd52784b79462bdb3a1dbf853aa4a4e6a5618d6a6a509c00633ad00173f94a5ef711d1060a3bf611f4e486ca70bb579326920c8187c01e00d7b5239c2a225503f5d3b67b67dbd522aa812e96fdc543d523b890174efe4389cbc39dcf8d6718ccd6a2d25d4f2f3f1a2d45b97eb0db2b58a4737af53ad2aedd646476ac29134d68b95f892ba1c96355d77640f58057357462636b6d437180a5b0ac2e725e55c473f8317c8102da1");
+    _ = try std.fmt.hexToBytes(&message, "19ec5cd571cd03774cbce0cec6b045eb9c1e550b124bc163efa2a25357e0466d104ddc80f773aa905f59b1fb19853e3d66f428e74ce00911b3373c47e77e58997df72ae7fe678278cee17fb6bf8494a687a4c5a349");
+    _ = try std.fmt.hexToBytes(&label, "28d1b43ab00f888176cd1f49ca5ca92ee53475be6edac24ba5144ede9bf5d5f57b96bafe2249b939c81af2c0091f2c00624c21485113827246671fbc31dcb86cb3519062a539bf83c7766d31239c52ec5df0416f18aaf72f0fd5991736f96fc43d55cbe62aeb6cfa9406803290083b7c32a9ecc13abdbf1a269ab87b2e3e922c3d0a3c7ec7dbe759162c9d20ccbece35243ba9ebf64714b9a54449b68e4870f723f6caece4cd4fdab033db3d51ed6a7a2e7b5351528559a88028b8fcd14e8df5d15d1059ba007321c9dc95da79753adb18f8bd7c9b742ad0ff1162584d324ead3f2dc40177d7a143c75254fda3a1fded150eaa0a44d745db96ab38301e22148e1571b88e1836c537c2f29dc526372ccbfb8f0a0e323608e3d08adeba2cc357738fa6953d9962638eb6285e7313f4eb86505a9c6abfca8db0e45fa91c20e3eeb900f218864063e1727aca74f5f9e7c4c5e3e2f0a69fa20ce588049658a3d360fe506d45d819e6f8bb4c69144021aefabac72746f3460e072fd26f37ec74a2a0d92f3ba62005684a0dc77796ccd9a780f0feb050a1ccdf0e9e4b584d121cb3a37502253c7bd879612e3055e9d412f1b0676ff3cf21395243beab20a596942114b6bbc6b7eb224180697ba34f23258a8a54e41ede188ba1853bc1bb75d3d70d033997aa7bb2eb80a7c6617e4e1cdedc2d072393ceddfb031e21b7773ad7b53727cad73a525a677c736f54aac7df6fa42a01670e0e00f322b4d28e90228f3562d34838e8b959e7250023fe7b07f4dbcecc19522e7cf42fd3d4404724fad3df48adae7d067fb5460125d0785ca7cb98dfcd872f9a43195327b063af65fc0b882680c74fb15d2a4e605344ce26e827e8815d6b297230e72b4d99c416544b2a177875a6a00cebff14385ea0de01da5231cde0f68641f4b1a005ade86d8ff63f031c17db78307b5374802692faba476c28a653dad0b07a763ef250925a6fa927dc35e562c90193b120079ceb7106e4d5fc4167814fd78bb1cf959f3b58e36568eaacf26c348a44ab440b7004c2e9864c6ba5b799c4a21310982a219e29248e6ad6a1553dcb517256fb0e7a9a5b1d7d497be6443e201da63915265b4bff6225022517ae48550b2b03470898cb2646af2e9608ed0351c006cfb9bd6c8643f20f47ba6775b35c41d7ec90d882422e79a2e5a9cd5639f2a402e80ea8151b563118eb82c21e57966cf08028cbaffe3144e39a3045f5cd1f4775a2a4432963c3c14919356754");
+    _ = try std.fmt.hexToBytes(&ciphertext, "9c3561c79b360421ffe42a84e7f77ecfea5e236ba97ed15f0de548a05253dfe845d804db6e6bdaf86638ff9309784458772f93844ffd58a11616cb110e936852e1007262348f239f9260b7e4ed87fceb393fca2bf57a2e44d8b6c1e6cd6b878905bb3a7f5ceb4042d4946643685c69ad16a3c6298a6f8648ed9f0810c79a755c4c468135c94895870dfbe3a2c6dcdb76454385da37eb234e253cfc57f4725ed66ed69f1b4f2fece8d795ff24c4775f1b3b5f40f1ab1214cada4ed5c78e98d4be0147b8dda4006996d2dcdb03222ac68b3cf8f55651c72f2ab1db4f54256c795f9f45d3e9cba99b45edc844303b698b70704c762aa81b87f125c63fd7d455a1aa");
+    const key = try PrivateKey.importPrivateExponent(std.testing.allocator, .{
+        .modulus_be = &modulus,
+        .public_exponent = 0x0ee52d763c25,
+        .d_be = &private_exponent,
+    }, .encryption);
+    defer key.deinit();
+    var output: [128]u8 = undefined;
+    const output_len = try key.decryptOaep(.sha256, &ciphertext, &label, &output);
+    try std.testing.expectEqualSlices(u8, &message, output[0..output_len]);
 }

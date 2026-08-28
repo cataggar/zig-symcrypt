@@ -271,6 +271,22 @@ See the generic `examples/initialize.zig`, linkage-specific
 - RSA 2048–16384-bit two-prime generation, checked raw component import/export,
   immutable usage, PKCS#1 v1.5 signatures, PSS, and OAEP.
 
+Advertised asymmetric algorithm matrix:
+
+| Operation | Algorithms |
+|---|---|
+| ECDH/ECDSA | P-256/P-384/P-521 with SHA-256/384/512 and SHA3-256/384/512, using normal ECDSA digest truncation |
+| X25519 | RFC 7748 Curve25519, 32-byte little-endian private/public/shared values |
+| RSA PKCS#1 signatures | SHA-256/384/512 and SHA3-256/384/512 |
+| RSA-PSS and RSA-OAEP | SHA-256/384/512 and SHA3-256/384/512 |
+| Legacy hash gate | ECDSA SHA-1; RSA PKCS#1 SHA-1/MD5; RSA-PSS/OAEP SHA-1 |
+
+The native matrix exercises every listed ECDSA curve/hash combination, generates
+2048-, 3072-, and 4096-bit RSA keys, and exercises each modern RSA SHA-2/SHA-3 row.
+Pinned NIST vectors cover ECDH/ECDSA on all three
+curves, RFC 7748 covers base and 1,000-iteration X25519 behavior, and pinned
+RSA vectors cover PKCS#1, PSS, and OAEP independently of generated round trips.
+
 ```zig
 const private = try symcrypt.asymmetric.ecc.PrivateKey.generate(
     allocator,
@@ -293,4 +309,8 @@ overflowing, extra, and trailing encodings without modifying the destination.
 RSA PKCS#1 signature `DigestInfo` is assembled from a stable allow-list in Zig,
 avoiding SymCrypt's private OID layout. Failed OAEP and gated legacy decryptions
 wipe the complete caller output. Owning handles must be destroyed exactly once;
-their aliases become invalid after `deinit`.
+their aliases become invalid after `deinit`. Modulus-sized PKCS#1/PSS signature
+representatives outside the RSA modulus are reported as `error.InvalidSignature`;
+caller length/hash/usage errors remain distinct. RSA component imports reject
+zero-prefixed and even big-endian moduli before allocation. X25519's public
+slice APIs validate 32-byte lengths before fixed-size normalization.

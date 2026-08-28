@@ -178,3 +178,69 @@ test "malformed DER is rejected without partial output" {
     try std.testing.expectError(error.InvalidLength, encode(&raw, 32, &short_output));
     try std.testing.expectEqualSlices(u8, &([_]u8{0xa5} ** 8), &short_output);
 }
+
+test "DER rejects malformed encodings and curve-width mismatches at every width" {
+    const malformed = [_][]const u8{
+        &.{ 0x31, 0x06, 0x02, 0x01, 1, 0x02, 0x01, 1 },
+        &.{ 0x30, 0x05, 0x02, 0x01, 1, 0x02, 0x00 },
+        &.{ 0x30, 0x06, 0x02, 0x01, 1, 0x03, 0x01, 1 },
+        &.{ 0x30, 0x07, 0x02, 0x02, 0, 0, 0x02, 0x01, 1 },
+        &.{ 0x30, 0x06, 0x02, 0x01, 1, 0x02, 0x01, 1, 0xff },
+        &.{ 0x30, 0x82, 0x00, 0x06, 0x02, 0x01, 1, 0x02, 0x01, 1 },
+        &.{ 0x30, 0xff },
+    };
+    inline for (.{ 32, 48, 66 }) |scalar_len| {
+        for (malformed) |signature| {
+            var output: [scalar_len * 2]u8 = [_]u8{0xa5} ** (scalar_len * 2);
+            try std.testing.expectError(error.InvalidEncoding, decode(signature, scalar_len, &output));
+            try std.testing.expectEqualSlices(
+                u8,
+                &([_]u8{0xa5} ** (scalar_len * 2)),
+                &output,
+            );
+        }
+        var raw: [scalar_len * 2]u8 = [_]u8{1} ** (scalar_len * 2);
+        var encoded: [141]u8 = undefined;
+        const encoded_len = try encode(&raw, scalar_len, &encoded);
+        var decoded: [scalar_len * 2]u8 = undefined;
+        try std.testing.expectError(
+            error.InvalidEncoding,
+            decode(encoded[0 .. encoded_len - 1], scalar_len, &decoded),
+        );
+        encoded[encoded_len] = 0;
+        try std.testing.expectError(
+            error.InvalidEncoding,
+            decode(encoded[0 .. encoded_len + 1], scalar_len, &decoded),
+        );
+    }
+
+    var overwide = [_]u8{0} ** 74;
+    overwide[0] = 0x30;
+    overwide[1] = 72;
+    overwide[2] = 0x02;
+    overwide[3] = 67;
+    overwide[4] = 1;
+    overwide[71] = 0x02;
+    overwide[72] = 1;
+    overwide[73] = 1;
+    inline for (.{ 32, 48, 66 }) |scalar_len| {
+        var output: [scalar_len * 2]u8 = undefined;
+        try std.testing.expectError(error.InvalidEncoding, decode(&overwide, scalar_len, &output));
+    }
+
+    var raw384 = [_]u8{0} ** 96;
+    raw384[0] = 1;
+    raw384[48] = 1;
+    var der384: [104]u8 = undefined;
+    const der384_len = try encode(&raw384, 48, &der384);
+    var raw256: [64]u8 = undefined;
+    try std.testing.expectError(error.InvalidEncoding, decode(der384[0..der384_len], 32, &raw256));
+
+    var raw521 = [_]u8{0} ** 132;
+    raw521[0] = 1;
+    raw521[66] = 1;
+    var der521: [141]u8 = undefined;
+    const der521_len = try encode(&raw521, 66, &der521);
+    var decoded384: [96]u8 = undefined;
+    try std.testing.expectError(error.InvalidEncoding, decode(der521[0..der521_len], 48, &decoded384));
+}

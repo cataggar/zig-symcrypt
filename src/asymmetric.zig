@@ -82,7 +82,7 @@ const WipeCheckingAllocator = struct {
     frees: usize = 0,
     nonzero_frees: usize = 0,
 
-    fn allocator(self: *WipeCheckingAllocator) std.mem.Allocator {
+    pub fn allocator(self: *WipeCheckingAllocator) std.mem.Allocator {
         return .{ .ptr = self, .vtable = &.{
             .alloc = alloc,
             .resize = resize,
@@ -140,3 +140,7 @@ const WipeCheckingAllocator = struct {
         self.backing.rawFree(memory, alignment, return_address);
     }
 };
+
+pub const testing = if (@import("builtin").is_test) struct {
+    pub const WipeAllocator = WipeCheckingAllocator;
+} else struct {};

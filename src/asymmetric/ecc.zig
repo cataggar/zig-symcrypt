@@ -63,6 +63,9 @@ const Impl = struct {
     usage: Usage,
 };
 
+const TestFailureStage = enum { none, after_curve, after_key };
+var test_failure_stage: TestFailureStage = .none;
+
 pub const PrivateKey = opaque {
     const Self = @This();
 
@@ -259,9 +262,17 @@ fn createKey(
     implementation.curve_object = c.SymCryptEcurveAllocate(curveParams(curve), 0);
     if (implementation.curve_object == null) return error.MemoryAllocationFailure;
     errdefer c.SymCryptEcurveFree(implementation.curve_object);
+    if (builtin.is_test and test_failure_stage == .after_curve) {
+        test_failure_stage = .none;
+        return error.MemoryAllocationFailure;
+    }
     implementation.key_object = c.SymCryptEckeyAllocate(implementation.curve_object);
     if (implementation.key_object == null) return error.MemoryAllocationFailure;
     errdefer c.SymCryptEckeyFree(implementation.key_object);
+    if (builtin.is_test and test_failure_stage == .after_key) {
+        test_failure_stage = .none;
+        return error.MemoryAllocationFailure;
+    }
 
     if (encoded) |value| {
         if (private) {
@@ -372,8 +383,13 @@ fn curveParams(curve: Curve) c.PCSYMCRYPT_ECURVE_PARAMS {
 
 test "generated P-curve agreements, signatures, and round trips" {
     const hash = if (options.legacy) @import("../hash_legacy.zig") else @import("../hash.zig");
-    const digest = try hash.digest(.sha256, "asymmetric test");
     inline for (.{ Curve.p256, Curve.p384, Curve.p521 }) |selected_curve| {
+        const algorithm = switch (selected_curve) {
+            .p256 => .sha256,
+            .p384 => .sha384,
+            .p521 => .sha512,
+        };
+        const digest = try hash.digest(algorithm, "asymmetric test");
         const alice = try PrivateKey.generate(std.testing.allocator, selected_curve, .signing_and_agreement);
         defer alice.deinit();
         const bob = try PrivateKey.generate(std.testing.allocator, selected_curve, .agreement);
@@ -403,17 +419,46 @@ test "generated P-curve agreements, signatures, and round trips" {
         );
 
         var signature: [141]u8 = undefined;
-        const signature_len = try alice.sign(.sha256, &digest, &signature);
-        try alice_public.verify(.sha256, &digest, signature[0..signature_len]);
+        const signature_len = try alice.sign(algorithm, &digest, &signature);
+        try alice_public.verify(algorithm, &digest, signature[0..signature_len]);
+        const wrong_key = try PrivateKey.generate(std.testing.allocator, selected_curve, .signing);
+        defer wrong_key.deinit();
+        const wrong_public = try wrong_key.publicKey(std.testing.allocator);
+        defer wrong_public.deinit();
+        try std.testing.expectError(
+            error.InvalidSignature,
+            wrong_public.verify(algorithm, &digest, signature[0..signature_len]),
+        );
         signature[signature_len - 1] ^= 1;
         try std.testing.expectError(
             error.InvalidSignature,
-            alice_public.verify(.sha256, &digest, signature[0..signature_len]),
+            alice_public.verify(algorithm, &digest, signature[0..signature_len]),
         );
         try std.testing.expectError(
             error.InvalidUsage,
-            bob.sign(.sha256, &digest, &signature),
+            bob.sign(algorithm, &digest, &signature),
         );
+        inline for (.{
+            hashes.Algorithm.sha256,
+            hashes.Algorithm.sha384,
+            hashes.Algorithm.sha512,
+            hashes.Algorithm.sha3_256,
+            hashes.Algorithm.sha3_384,
+            hashes.Algorithm.sha3_512,
+        }) |matrix_algorithm| {
+            const matrix_digest = try hash.digest(matrix_algorithm, "ECDSA algorithm matrix");
+            const matrix_signature_len = try alice.sign(matrix_algorithm, &matrix_digest, &signature);
+            try alice_public.verify(
+                matrix_algorithm,
+                &matrix_digest,
+                signature[0..matrix_signature_len],
+            );
+        }
+        if (comptime options.legacy) {
+            const legacy_digest = try hash.digest(.sha1, "ECDSA legacy matrix");
+            const legacy_signature_len = try alice.sign(.sha1, &legacy_digest, &signature);
+            try alice_public.verify(.sha1, &legacy_digest, signature[0..legacy_signature_len]);
+        }
         if (selected_curve != .p256) {
             const wrong_curve_public = try tryWrongCurvePublic(selected_curve);
             defer wrong_curve_public.deinit();
@@ -438,6 +483,28 @@ test "ECC wrapper allocation failures do not return partial owners" {
         error.OutOfMemory,
         PrivateKey.generate(failing.allocator(), .p256, .signing),
     );
+
+    inline for (.{ TestFailureStage.after_curve, TestFailureStage.after_key }) |stage| {
+        var checking = asymmetric.testing.WipeAllocator{ .backing = std.testing.allocator };
+        test_failure_stage = stage;
+        try std.testing.expectError(
+            error.MemoryAllocationFailure,
+            PrivateKey.generate(checking.allocator(), .p256, .signing),
+        );
+        try std.testing.expectEqual(@as(usize, 1), checking.frees);
+        try std.testing.expectEqual(@as(usize, 0), checking.nonzero_frees);
+    }
+}
+
+test "invalid SEC1 points are rejected for every advertised curve" {
+    inline for (.{ Curve.p256, Curve.p384, Curve.p521 }) |selected_curve| {
+        var invalid: [selected_curve.publicLength()]u8 = [_]u8{0} ** selected_curve.publicLength();
+        invalid[0] = 4;
+        if (PublicKey.import(std.testing.allocator, selected_curve, &invalid, .agreement)) |key| {
+            key.deinit();
+            return error.TestExpectedError;
+        } else |_| {}
+    }
 }
 
 test "pinned NIST P-256 ECDH and ECDSA known answers" {
@@ -471,6 +538,83 @@ test "pinned NIST P-256 ECDH and ECDSA known answers" {
     const verifying_key = try PublicKey.import(std.testing.allocator, .p256, &public_sec1, .signing);
     defer verifying_key.deinit();
     try verifying_key.verify(.sha256, &digest, signature_der[0..signature_len]);
+}
+
+fn runNistKat(
+    comptime selected_curve: Curve,
+    comptime algorithm: hashes.Algorithm,
+    comptime private_hex: []const u8,
+    comptime peer_x_hex: []const u8,
+    comptime peer_y_hex: []const u8,
+    comptime secret_hex: []const u8,
+    comptime message_hex: []const u8,
+    comptime public_x_hex: []const u8,
+    comptime public_y_hex: []const u8,
+    comptime r_hex: []const u8,
+    comptime s_hex: []const u8,
+) !void {
+    const hash = if (options.legacy) @import("../hash_legacy.zig") else @import("../hash.zig");
+    const scalar_len = comptime selected_curve.scalarLength();
+    var private_scalar: [scalar_len]u8 = undefined;
+    var peer_sec1: [1 + 2 * scalar_len]u8 = undefined;
+    var expected_secret: [scalar_len]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&private_scalar, private_hex);
+    peer_sec1[0] = 4;
+    _ = try std.fmt.hexToBytes(peer_sec1[1 .. 1 + scalar_len], peer_x_hex);
+    _ = try std.fmt.hexToBytes(peer_sec1[1 + scalar_len ..], peer_y_hex);
+    _ = try std.fmt.hexToBytes(&expected_secret, secret_hex);
+    const private = try PrivateKey.import(std.testing.allocator, selected_curve, &private_scalar, .agreement);
+    defer private.deinit();
+    const peer = try PublicKey.import(std.testing.allocator, selected_curve, &peer_sec1, .agreement);
+    defer peer.deinit();
+    const secret = try private.agree(std.testing.allocator, peer);
+    defer secret.deinit();
+    try std.testing.expectEqualSlices(u8, &expected_secret, secret.bytes());
+
+    var message: [128]u8 = undefined;
+    var public_sec1: [1 + 2 * scalar_len]u8 = undefined;
+    var raw_signature: [2 * scalar_len]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&message, message_hex);
+    public_sec1[0] = 4;
+    _ = try std.fmt.hexToBytes(public_sec1[1 .. 1 + scalar_len], public_x_hex);
+    _ = try std.fmt.hexToBytes(public_sec1[1 + scalar_len ..], public_y_hex);
+    _ = try std.fmt.hexToBytes(raw_signature[0..scalar_len], r_hex);
+    _ = try std.fmt.hexToBytes(raw_signature[scalar_len..], s_hex);
+    const digest = try hash.digest(algorithm, &message);
+    var signature_der: [141]u8 = undefined;
+    const signature_len = try der.encode(&raw_signature, scalar_len, &signature_der);
+    const public = try PublicKey.import(std.testing.allocator, selected_curve, &public_sec1, .signing);
+    defer public.deinit();
+    try public.verify(algorithm, &digest, signature_der[0..signature_len]);
+}
+
+test "pinned NIST P-384 and P-521 ECDH and ECDSA known answers" {
+    try runNistKat(
+        .p384,
+        .sha384,
+        "3cc3122a68f0d95027ad38c067916ba0eb8c38894d22e1b15618b6818a661774ad463b205da88cf699ab4d43c9cf98a1",
+        "a7c76b970c3b5fe8b05d2838ae04ab47697b9eaf52e764592efda27fe7513272734466b400091adbf2d68c58e0c50066",
+        "ac68f19f2e1cb879aed43a9969b91a0839c4c38a49749b661efedf243451915ed0905a32b060992b468c64766fc8437a",
+        "5f9d29dc5e31a163060356213669c8ce132e22f57c9a04f40ba7fcead493b457e5621e766c40a2e3d4d6a04b25e533f1",
+        "6b45d88037392e1371d9fd1cd174e9c1838d11c3d6133dc17e65fa0c485dcca9f52d41b60161246039e42ec784d49400bffdb51459f5de654091301a09378f93464d52118b48d44b30d781eb1dbed09da11fb4c818dbd442d161aba4b9edc79f05e4b7e401651395b53bd8b5bd3f2aaa6a00877fa9b45cadb8e648550b4c6cbe",
+        "c2b47944fb5de342d03285880177ca5f7d0f2fcad7678cce4229d6e1932fcac11bfc3c3e97d942a3c56bf34123013dbf",
+        "37257906a8223866eda0743c519616a76a758ae58aee81c5fd35fbf3a855b7754a36d4a0672df95d6c44a81cf7620c2d",
+        "50835a9251bad008106177ef004b091a1e4235cd0da84fff54542b0ed755c1d6f251609d14ecf18f9e1ddfe69b946e32",
+        "0475f3d30c6463b646e8d3bf2455830314611cbde404be518b14464fdb195fdcc92eb222e61f426a4a592c00a6a89721",
+    );
+    try runNistKat(
+        .p521,
+        .sha512,
+        "017eecc07ab4b329068fba65e56a1f8890aa935e57134ae0ffcce802735151f4eac6564f6ee9974c5e6887a1fefee5743ae2241bfeb95d5ce31ddcb6f9edb4d6fc47",
+        "00685a48e86c79f0f0875f7bc18d25eb5fc8c0b07e5da4f4370f3a9490340854334b1e1b87fa395464c60626124a4e70d0f785601d37c09870ebf176666877a2046d",
+        "01ba52c56fc8776d9e8f5db4f0cc27636d0b741bbe05400697942e80b739884a83bde99e0f6716939e632bc8986fa18dccd443a348b6c3e522497955a4f3c302f676",
+        "005fc70477c3e63bc3954bd0df3ea0d1f41ee21746ed95fc5e1fdf90930d5e136672d72cc770742d1711c3c3a4c334a0ad9759436a4d3c5bf6e74b9578fac148c831",
+        "9ecd500c60e701404922e58ab20cc002651fdee7cbc9336adda33e4c1088fab1964ecb7904dc6856865d6c8e15041ccf2d5ac302e99d346ff2f686531d25521678d4fd3f76bbf2c893d246cb4d7693792fe18172108146853103a51f824acc621cb7311d2463c3361ea707254f2b052bc22cb8012873dcbb95bf1a5cc53ab89f",
+        "0061387fd6b95914e885f912edfbb5fb274655027f216c4091ca83e19336740fd81aedfe047f51b42bdf68161121013e0d55b117a14e4303f926c8debb77a7fdaad1",
+        "00e7d0c75c38626e895ca21526b9f9fdf84dcecb93f2b233390550d2b1463b7ee3f58df7346435ff0434199583c97c665a97f12f706f2357da4b40288def888e59e6",
+        "004de826ea704ad10bc0f7538af8a3843f284f55c8b946af9235af5af74f2b76e099e4bc72fd79d28a380f8d4b4c919ac290d248c37983ba05aea42e2dd79fdd33e8",
+        "0087488c859a96fea266ea13bf6d114c429b163be97a57559086edb64aed4a18594b46fb9efc7fd25d8b2de8f09ca0587f54bd287299f47b2ff124aac566e8ee3b43",
+    );
 }
 
 const ConcurrentVerifyWork = struct {
