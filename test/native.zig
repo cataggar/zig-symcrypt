@@ -627,3 +627,63 @@ test "static callbacks allocate and synchronize" {
     for (&threads) |*thread| thread.join();
     try std.testing.expectEqual(@as(usize, 8000), value);
 }
+
+extern fn SymCryptZigTestFailAllocationAfter(allocation_index: usize) void;
+extern fn SymCryptZigTestDisableAllocationFailure() void;
+
+test "static callback allocation failures clean up ECC and RSA construction" {
+    if (symcrypt.linkage != .static) return error.SkipZigTest;
+    defer SymCryptZigTestDisableAllocationFailure();
+
+    const warm_ecc = try symcrypt.asymmetric.ecc.PrivateKey.generate(
+        std.testing.allocator,
+        .p256,
+        .signing,
+    );
+    warm_ecc.deinit();
+    const warm_rsa = try symcrypt.asymmetric.rsa.PrivateKey.generate(
+        std.testing.allocator,
+        2048,
+        null,
+        .signing,
+    );
+    warm_rsa.deinit();
+
+    for (0..2) |failure_index| {
+        SymCryptZigTestFailAllocationAfter(failure_index);
+        try std.testing.expectError(
+            error.MemoryAllocationFailure,
+            symcrypt.asymmetric.ecc.PrivateKey.generate(
+                std.testing.allocator,
+                .p256,
+                .signing,
+            ),
+        );
+    }
+    SymCryptZigTestDisableAllocationFailure();
+    const recovered_ecc = try symcrypt.asymmetric.ecc.PrivateKey.generate(
+        std.testing.allocator,
+        .p256,
+        .signing,
+    );
+    recovered_ecc.deinit();
+
+    SymCryptZigTestFailAllocationAfter(0);
+    try std.testing.expectError(
+        error.MemoryAllocationFailure,
+        symcrypt.asymmetric.rsa.PrivateKey.generate(
+            std.testing.allocator,
+            2048,
+            null,
+            .signing,
+        ),
+    );
+    SymCryptZigTestDisableAllocationFailure();
+    const recovered_rsa = try symcrypt.asymmetric.rsa.PrivateKey.generate(
+        std.testing.allocator,
+        2048,
+        null,
+        .signing,
+    );
+    recovered_rsa.deinit();
+}

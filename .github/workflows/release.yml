@@ -1,0 +1,82 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    uses: ./.github/workflows/linux-validation.yml
+
+  windows:
+    uses: ./.github/workflows/windows-validation.yml
+
+  release-validation:
+    uses: ./.github/workflows/release-validation.yml
+
+  publish:
+    name: Create source-only GitHub release
+    needs:
+      - linux
+      - windows
+      - release-validation
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          repository: microsoft/SymCrypt
+          ref: 286762b7730e2b780678f5ab11fef2b1bad639e0
+          path: .symcrypt-ci-source
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.16.0
+      - name: Build final pinned dynamic release fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cmake ninja-build python3-pyelftools
+          git -C .symcrypt-ci-source submodule update --init --depth 1 \
+            3rdparty/jitterentropy-library
+          tools/build-linux-fixtures.sh \
+            "$GITHUB_WORKSPACE/.symcrypt-ci-source" \
+            "$GITHUB_WORKSPACE/.symcrypt-ci/x86_64" \
+            x86_64
+      - name: Run final gates and create archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$GITHUB_WORKSPACE/.symcrypt-ci/x86_64"
+          shared="$fixture/module/generic/libsymcrypt.so"
+          export LD_LIBRARY_PATH="$(dirname "$shared")"
+          zig build release-package \
+            -Dtarget=x86_64-linux-gnu \
+            -Dlinkage=dynamic \
+            -Drelease_tag="$GITHUB_REF_NAME" \
+            -Dsymcrypt_provenance="$fixture/provenance.json" \
+            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
+            -Dsymcrypt_libraries="$shared" \
+            --summary all
+      - name: Publish only the gated source archive and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            zig-out/release/zig-symcrypt-0.1.0.tar.gz \
+            zig-out/release/zig-symcrypt-0.1.0.tar.gz.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes

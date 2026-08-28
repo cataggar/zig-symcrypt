@@ -1,6 +1,7 @@
 name: Linux validation
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches:
@@ -11,12 +12,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: linux-validation-${{ github.ref }}
+  group: linux-validation-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   native:
-    name: ${{ matrix.target }} (dynamic + static execute)
+    name: ${{ matrix.target }} dynamic/static native
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -25,11 +26,9 @@ jobs:
           - target: x86_64-linux-gnu
             arch: x86_64
             runner: ubuntu-24.04
-            run_repository_gates: true
           - target: aarch64-linux-gnu
             arch: aarch64
             runner: ubuntu-24.04-arm
-            run_repository_gates: false
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
         with:
@@ -39,23 +38,21 @@ jobs:
           repository: microsoft/SymCrypt
           ref: 286762b7730e2b780678f5ab11fef2b1bad639e0
           path: .symcrypt-ci-source
-          fetch-depth: 1
+          fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.16.0
-      - name: Verify native build tools
+      - name: Prepare pinned upstream dependency and tools
         shell: bash
         run: |
           set -euo pipefail
-          for tool in cmake ninja python3 git readelf; do
-            command -v "$tool" >/dev/null || {
-              echo "required build tool is unavailable: $tool" >&2
-              exit 1
-            }
-          done
-      - name: Build pinned native SymCrypt fixtures
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cmake ninja-build python3-pyelftools
+          git -C .symcrypt-ci-source submodule update --init --depth 1 \
+            3rdparty/jitterentropy-library
+      - name: Build immutable pinned fixtures
         shell: bash
         run: |
           set -euo pipefail
@@ -63,67 +60,65 @@ jobs:
             "$GITHUB_WORKSPACE/.symcrypt-ci-source" \
             "$GITHUB_WORKSPACE/.symcrypt-ci/${{ matrix.arch }}" \
             "${{ matrix.arch }}"
-      - name: Run dynamic build and tests
+      - name: Verify and execute complete dynamic matrix
         shell: bash
         run: |
           set -euo pipefail
           fixture="$GITHUB_WORKSPACE/.symcrypt-ci/${{ matrix.arch }}"
+          manifest="$fixture/provenance.json"
           shared="$fixture/module/generic/libsymcrypt.so"
           export LD_LIBRARY_PATH="$(dirname "$shared")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          zig build example \
+          libraries=(
+            "-Dsymcrypt_libraries=$fixture/lib/libsymcrypt_plus.a"
+            "-Dsymcrypt_libraries=$shared"
+          )
+          zig build abi-release-gate \
             -Dtarget=${{ matrix.target }} \
             -Dlinkage=dynamic \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
-            -Dsymcrypt_libraries="$shared"
-          zig build test \
-            -Dtarget=${{ matrix.target }} \
-            -Dlinkage=dynamic \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
-            -Dsymcrypt_libraries="$shared" \
-            --summary all
-          zig build test \
-            -Dtarget=${{ matrix.target }} \
-            -Dlinkage=dynamic \
-            -Dlegacy=true \
-            -Denable_legacy_rsa_pkcs1_encryption=true \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
-            -Dsymcrypt_libraries="$shared" \
-            --summary all
-      - name: Run static build and tests
+            -Dsymcrypt_provenance="$manifest" \
+            "${libraries[@]}" --summary all
+          zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+            -Dlinkage=dynamic "${libraries[@]}" --summary all
+          for optimize in Debug ReleaseSafe; do
+            zig build test -Dtarget=${{ matrix.target }} -Doptimize="$optimize" \
+              -Dlinkage=dynamic -Dlegacy=true "${libraries[@]}" --summary all
+            zig build test -Dtarget=${{ matrix.target }} -Doptimize="$optimize" \
+              -Dlinkage=dynamic -Dlegacy=true \
+              -Denable_legacy_rsa_pkcs1_encryption=true \
+              "${libraries[@]}" --summary all
+          done
+          zig build example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+            -Dlinkage=dynamic "${libraries[@]}"
+          zig build consumer-example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+            -Dlinkage=dynamic "${libraries[@]}"
+      - name: Verify and execute complete static matrix
         shell: bash
         run: |
           set -euo pipefail
           fixture="$GITHUB_WORKSPACE/.symcrypt-ci/${{ matrix.arch }}"
-          zig build example \
+          manifest="$fixture/provenance.json"
+          libraries=(
+            "-Dsymcrypt_libraries=$fixture/lib/libsymcrypt_plus.a"
+            "-Dsymcrypt_libraries=$fixture/lib/libsymcrypt_posixusermode.a"
+            "-Dsymcrypt_libraries=$fixture/lib/libsymcrypt_common.a"
+            "-Dsymcrypt_libraries=$fixture/lib/libsymcrypt_mlkem.a"
+          )
+          zig build abi-release-gate \
             -Dtarget=${{ matrix.target }} \
             -Dlinkage=static \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_posixusermode.a" \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_common.a" \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_mlkem.a"
-          zig build test \
-            -Dtarget=${{ matrix.target }} \
-            -Dlinkage=static \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_posixusermode.a" \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_common.a" \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_mlkem.a" \
-            --summary all
-          zig build test \
-            -Dtarget=${{ matrix.target }} \
-            -Dlinkage=static \
-            -Dlegacy=true \
-            -Denable_legacy_rsa_pkcs1_encryption=true \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_plus.a" \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_posixusermode.a" \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_common.a" \
-            -Dsymcrypt_libraries="$fixture/lib/libsymcrypt_mlkem.a" \
-            --summary all
-      - name: Run ABI, package, and diagnostic gates
-        if: matrix.run_repository_gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          zig build abi-local -Dheaders_only=true --summary all
-          test/build_diagnostics.sh
-          tools/check-package.sh
+            -Dsymcrypt_provenance="$manifest" \
+            "${libraries[@]}" --summary all
+          zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+            -Dlinkage=static "${libraries[@]}" --summary all
+          for optimize in Debug ReleaseSafe; do
+            zig build test -Dtarget=${{ matrix.target }} -Doptimize="$optimize" \
+              -Dlinkage=static -Dlegacy=true "${libraries[@]}" --summary all
+            zig build test -Dtarget=${{ matrix.target }} -Doptimize="$optimize" \
+              -Dlinkage=static -Dlegacy=true \
+              -Denable_legacy_rsa_pkcs1_encryption=true \
+              "${libraries[@]}" --summary all
+          done
+          zig build example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+            -Dlinkage=static "${libraries[@]}"
+          zig build consumer-example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+            -Dlinkage=static "${libraries[@]}"

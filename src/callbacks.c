@@ -15,8 +15,27 @@
 #include <stdint.h>
 #include <symcrypt.h>
 
+static SIZE_T g_symcrypt_zig_fail_allocation = (SIZE_T)-1;
+static SIZE_T g_symcrypt_zig_allocation_count = 0;
+
+VOID SymCryptZigTestFailAllocationAfter(SIZE_T allocationIndex)
+{
+    g_symcrypt_zig_allocation_count = 0;
+    g_symcrypt_zig_fail_allocation = allocationIndex;
+}
+
+VOID SymCryptZigTestDisableAllocationFailure(void)
+{
+    g_symcrypt_zig_allocation_count = 0;
+    g_symcrypt_zig_fail_allocation = (SIZE_T)-1;
+}
+
 PVOID SYMCRYPT_CALL SymCryptCallbackAlloc(SIZE_T nBytes)
 {
+    SIZE_T allocationIndex = g_symcrypt_zig_allocation_count++;
+    if (allocationIndex == g_symcrypt_zig_fail_allocation) {
+        return NULL;
+    }
     SIZE_T size = nBytes == 0 ? 1 : nBytes;
 #if defined(_WIN32)
     return _aligned_malloc(size, SYMCRYPT_ASYM_ALIGN_VALUE);

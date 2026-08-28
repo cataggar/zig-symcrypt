@@ -3,7 +3,11 @@
 /.symcrypt-zig-build/
 /.symcrypt-ci/
 /.symcrypt-ci-source/
+/.zig-release-staging/
+/.zig-consumer-stage/
 /.zig-cache/
+**/.zig-cache/
 /.zig-negative-fixtures/
 /.zig-package-check/
 /zig-out/
+**/zig-out/

@@ -1,0 +1,10 @@
+.{
+    .name = .zig_symcrypt_dynamic_example,
+    .version = "0.0.0",
+    .fingerprint = 0x78a3c817114f35ef,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .zig_symcrypt = .{ .path = "../.." },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+}

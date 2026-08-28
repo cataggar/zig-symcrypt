@@ -68,4 +68,5 @@ test "first initialization makes every contender wait for the CAS winner" {
     for (&threads) |*thread| thread.join();
     joined = true;
     try std.testing.expect(!@atomicLoad(bool, &failed, .acquire));
+    try std.testing.expectEqual(@as(usize, 1), initialization.TestHooks.attemptCount());
 }

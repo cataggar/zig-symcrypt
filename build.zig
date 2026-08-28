@@ -4,6 +4,8 @@ pub const Linkage = enum { dynamic, static };
 
 const supported_targets =
     "x86_64-linux-gnu, aarch64-linux-gnu, x86_64-windows-msvc, aarch64-windows-msvc";
+const library_help =
+    "pass -Dsymcrypt_include_dir and ordered repeated -Dsymcrypt_libraries exact files; release gates also require -Dsymcrypt_provenance";
 
 pub fn build(b: *std.Build) void {
     const default_target: std.Target.Query = if (b.graph.host.result.os.tag == .windows)
@@ -54,6 +56,26 @@ pub fn build(b: *std.Build) void {
         "headers_only",
         "Compile only header/version/ABI checks; no native library is required",
     ) orelse false;
+    const provenance = b.option(
+        std.Build.LazyPath,
+        "symcrypt_provenance",
+        "Verified fixture provenance manifest for ABI/release gates",
+    );
+    const release_tag = b.option(
+        []const u8,
+        "release_tag",
+        "Exact release tag; must be v<build.zig.zon package version>",
+    );
+
+    const format_command = b.addSystemCommand(&.{
+        "zig", "fmt", "--check", "build.zig", "src", "test", "examples",
+    });
+    const format_step = b.step("format-check", "Check Zig formatting");
+    format_step.dependOn(&format_command.step);
+
+    const package_command = b.addSystemCommand(&.{ "sh", "tools/check-package.sh" });
+    const package_step = b.step("package-check", "Extract and validate the source package allow-list");
+    package_step.dependOn(&package_command.step);
 
     const target_ok = validateTarget(b, target, system_include_dirs);
     const libraries_ok = if (headers_only) true else validateLibraries(b, target, linkage, libraries);
@@ -68,6 +90,9 @@ pub fn build(b: *std.Build) void {
         b.step("test-compile", "Compile and link native tests without running them")
             .dependOn(&fail.step);
         b.step("example", "Build initialization and asymmetric examples").dependOn(&fail.step);
+        b.step("consumer-example", "Build and run the staged-package consumer example").dependOn(&fail.step);
+        b.step("abi-release-gate", "Verify exact fixture provenance, ABI, linkage, and tests").dependOn(&fail.step);
+        b.step("release-package", "Create a source release archive after every local gate").dependOn(&fail.step);
         b.step("abi-local", "Compile host-available ABI checks").dependOn(&fail.step);
         b.step("abi", "Compile the full ABI matrix").dependOn(&fail.step);
         return;
@@ -107,6 +132,9 @@ pub fn build(b: *std.Build) void {
         b.step("test-compile", "Compile and link native test executables without running them")
             .dependOn(&fail.step);
         b.step("example", "Build the minimal initialization example").dependOn(&fail.step);
+        b.step("consumer-example", "Build and run the staged-package consumer example").dependOn(&fail.step);
+        b.step("abi-release-gate", "Verify exact fixture provenance, ABI, linkage, and tests").dependOn(&fail.step);
+        b.step("release-package", "Create a source release archive after every local gate").dependOn(&fail.step);
         return;
     }
 
@@ -134,6 +162,38 @@ pub fn build(b: *std.Build) void {
         test_step,
         test_compile_step,
     );
+
+    const verify_provenance = if (provenance) |manifest| verify: {
+        const command = b.addSystemCommand(&.{
+            "python3",
+            "tools/fixture_manifest.py",
+            "verify",
+            "--manifest",
+        });
+        command.addFileArg(manifest);
+        command.addArgs(&.{ "--target", canonicalTargetTriple(b, target) });
+        command.addArgs(&.{ "--linkage", @tagName(linkage) });
+        for (libraries) |library| {
+            command.addArg("--library");
+            command.addFileArg(library);
+        }
+        break :verify command;
+    } else null;
+
+    const abi_release_step = b.step(
+        "abi-release-gate",
+        "Verify exact fixture provenance, header ABI, linkage, initialization, and complete tests",
+    );
+    abi_release_step.dependOn(abi_local_step);
+    abi_release_step.dependOn(test_step);
+    if (verify_provenance) |command| {
+        abi_release_step.dependOn(&command.step);
+    } else {
+        const fail = b.addFail(
+            "abi-release-gate requires -Dsymcrypt_provenance=/exact/path/provenance.json matching every supplied library",
+        );
+        abi_release_step.dependOn(&fail.step);
+    }
 
     const example_mod = b.createModule(.{
         .root_source_file = b.path(if (linkage == .dynamic)
@@ -169,6 +229,50 @@ pub fn build(b: *std.Build) void {
     example_step.dependOn(&example.step);
     example_step.dependOn(&symmetric_example.step);
     example_step.dependOn(&asymmetric_example.step);
+
+    const consumer_example_step = b.step(
+        "consumer-example",
+        "Build and run the external-style consumer example for the selected linkage",
+    );
+    addConsumerExample(
+        b,
+        target,
+        optimize,
+        linkage,
+        include_dir,
+        libraries,
+        checked,
+        legacy,
+        legacy_rsa,
+        consumer_example_step,
+    );
+
+    const release_package_step = b.step(
+        "release-package",
+        "Create the allow-listed source archive after ABI, tests, package, examples, and tag checks",
+    );
+    release_package_step.dependOn(abi_release_step);
+    release_package_step.dependOn(format_step);
+    release_package_step.dependOn(package_step);
+    release_package_step.dependOn(consumer_example_step);
+    if (release_tag) |tag| {
+        const archive = b.addSystemCommand(&.{
+            "python3",
+            "tools/release_package.py",
+            "--tag",
+            tag,
+        });
+        if (provenance) |manifest| {
+            archive.addArg("--provenance");
+            archive.addFileArg(manifest);
+        }
+        release_package_step.dependOn(&archive.step);
+    } else {
+        const fail = b.addFail(
+            "release-package requires -Drelease_tag=v0.1.0 and an exact 103.13.0 provenance manifest",
+        );
+        release_package_step.dependOn(&fail.step);
+    }
 
     b.getInstallStep().dependOn(abi_local_step);
     b.getInstallStep().dependOn(&example.step);
@@ -262,16 +366,19 @@ fn validateTarget(
     const triple = t.zigTriple(b.allocator) catch @panic("out of memory");
     if (t.os.tag == .linux and t.abi == .musl) {
         std.log.err(
-            "unsupported target '{s}': SymCrypt 103.13.0 fixtures are GNU user mode, not musl; supported: {s}",
-            .{ triple, supported_targets },
+            "unsupported target '{s}': SymCrypt 103.13.0 fixtures are GNU user mode, not musl; supported: {s}; {s}",
+            .{ triple, supported_targets, library_help },
         );
     } else if (t.os.tag == .windows and t.abi != .msvc) {
         std.log.err(
-            "unsupported target '{s}': Windows requires the MSVC ABI/SDK; supported: {s}",
-            .{ triple, supported_targets },
+            "unsupported target '{s}': Windows requires the MSVC ABI/SDK; supported: {s}; {s}",
+            .{ triple, supported_targets, library_help },
         );
     } else {
-        std.log.err("unsupported target '{s}'; supported: {s}", .{ triple, supported_targets });
+        std.log.err(
+            "unsupported target '{s}'; supported: {s}; {s}",
+            .{ triple, supported_targets, library_help },
+        );
     }
     b.invalid_user_input = true;
     return false;
@@ -325,6 +432,74 @@ fn validateLibraries(
             .{},
         );
         ok = false;
+    }
+    if (libraries.len != 0) {
+        const first = std.fs.path.basename(libraries[0].getDisplayName());
+        if (std.mem.indexOf(u8, first, "symcrypt_plus") == null) {
+            std.log.err(
+                "wrong SymCrypt library order: the pinned symcrypt_plus companion must be first, found '{s}'",
+                .{first},
+            );
+            ok = false;
+        }
+
+        if (target.result.os.tag == .linux) {
+            if (linkage == .dynamic) {
+                if (libraries.len != 2 or !isSharedObject(libraries[libraries.len - 1].getDisplayName())) {
+                    std.log.err(
+                        "wrong dynamic Linux linkage set: expected exactly libsymcrypt_plus.a then libsymcrypt.so (or exact versioned SONAME)",
+                        .{},
+                    );
+                    ok = false;
+                }
+            } else {
+                const expected = [_][]const u8{
+                    "libsymcrypt_plus.a",
+                    "libsymcrypt_posixusermode.a",
+                    "libsymcrypt_common.a",
+                    "libsymcrypt_mlkem.a",
+                };
+                if (libraries.len != expected.len) {
+                    std.log.err(
+                        "wrong static Linux linkage set: expected exactly libsymcrypt_plus.a, libsymcrypt_posixusermode.a, libsymcrypt_common.a, libsymcrypt_mlkem.a in that order",
+                        .{},
+                    );
+                    ok = false;
+                } else {
+                    for (libraries, expected) |library, expected_name| {
+                        if (!std.mem.eql(u8, std.fs.path.basename(library.getDisplayName()), expected_name)) {
+                            std.log.err(
+                                "wrong static Linux linkage order: expected '{s}', found '{s}'",
+                                .{ expected_name, std.fs.path.basename(library.getDisplayName()) },
+                            );
+                            ok = false;
+                        }
+                    }
+                }
+            }
+        } else if (libraries.len != 2) {
+            std.log.err(
+                "wrong Windows linkage set: expected exactly symcrypt_plus_NoCIL.lib followed by the core import or static library",
+                .{},
+            );
+            ok = false;
+        } else {
+            const core = std.fs.path.basename(libraries[1].getDisplayName());
+            const identifies_static = std.mem.indexOf(u8, core, "static") != null;
+            if (linkage == .dynamic and identifies_static) {
+                std.log.err(
+                    "wrong dynamic Windows linkage kind: expected the DLL import .lib, found static library '{s}'",
+                    .{core},
+                );
+                ok = false;
+            } else if (linkage == .static and !identifies_static) {
+                std.log.err(
+                    "wrong static Windows linkage kind: expected symcrypt_static_NoCIL.lib, found '{s}'",
+                    .{core},
+                );
+                ok = false;
+            }
+        }
     }
     if (!ok) b.invalid_user_input = true;
     return ok;
@@ -403,7 +578,7 @@ fn addNativeTests(
     test_compile_step: *std.Build.Step,
 ) void {
     const test_mod = b.createModule(.{
-        .root_source_file = b.path("test/native.zig"),
+        .root_source_file = b.path("test/all.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -475,5 +650,70 @@ fn addNativeTests(
         const run_mismatch = b.addRunArtifact(mismatch);
         test_compile_step.dependOn(&mismatch.step);
         test_step.dependOn(&run_mismatch.step);
+
+        const api_mismatch_options = makeOptions(b, .dynamic, include_dir, checked, false, legacy, legacy_rsa);
+        const api_mismatch_mod = b.createModule(.{
+            .root_source_file = b.path("src/mismatch_api_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        configureHeaders(api_mismatch_mod, include_dir, system_include_dirs, checked, api_mismatch_options);
+        for (symcrypt.link_objects.items) |object| api_mismatch_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
+        const api_mismatch = b.addTest(.{ .root_module = api_mismatch_mod });
+        const run_api_mismatch = b.addRunArtifact(api_mismatch);
+        test_compile_step.dependOn(&api_mismatch.step);
+        test_step.dependOn(&run_api_mismatch.step);
     }
+}
+
+fn addConsumerExample(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    linkage: Linkage,
+    include_dir: std.Build.LazyPath,
+    libraries: []const std.Build.LazyPath,
+    checked: bool,
+    legacy: bool,
+    legacy_rsa: bool,
+    step: *std.Build.Step,
+) void {
+    const command = b.addSystemCommand(&.{
+        "python3",
+        "tools/run_staged_consumer.py",
+        "--linkage",
+        @tagName(linkage),
+    });
+    command.addArgs(&.{
+        "--target",
+        canonicalTargetTriple(b, target),
+        "--optimize",
+        @tagName(optimize),
+        "--include",
+        include_dir.getPath(b),
+        "--checked",
+        if (checked) "true" else "false",
+        "--legacy",
+        if (legacy) "true" else "false",
+        "--legacy-rsa",
+        if (legacy_rsa) "true" else "false",
+    });
+    for (libraries) |library| {
+        command.addArg("--library");
+        command.addFileArg(library);
+    }
+
+    step.dependOn(&command.step);
+}
+
+fn canonicalTargetTriple(b: *std.Build, target: std.Build.ResolvedTarget) []const u8 {
+    return b.fmt(
+        "{s}-{s}-{s}",
+        .{
+            @tagName(target.result.cpu.arch),
+            @tagName(target.result.os.tag),
+            @tagName(target.result.abi),
+        },
+    );
 }

@@ -27,12 +27,20 @@ expect_failure full-abi-needs-windows "full ABI matrix requires MSVC/Windows SDK
     zig build abi -Dheaders_only=true
 expect_failure unsupported-arch "unsupported target 'x86-linux" \
     zig build abi-local -Dheaders_only=true -Dtarget=x86-linux-gnu
+expect_failure unsupported-os "unsupported target 'wasm32-wasi" \
+    zig build abi-local -Dheaders_only=true -Dtarget=wasm32-wasi
 expect_failure musl "fixtures are GNU user mode, not musl" \
     zig build abi-local -Dheaders_only=true -Dtarget=x86_64-linux-musl
 expect_failure windows-gnu "Windows requires the MSVC ABI/SDK" \
     zig build abi-local -Dheaders_only=true -Dtarget=x86_64-windows-gnu
 expect_failure dynamic-archive "expected .so or versioned .so.N" \
     zig build abi-local -Dsymcrypt_libraries=fake.a
+expect_failure missing-plus "missing pinned symcrypt_plus" \
+    zig build abi-local -Dsymcrypt_libraries=libsymcrypt.so
+expect_failure wrong-linux-static-set "wrong static Linux linkage set" \
+    zig build abi-local -Dlinkage=static \
+      -Dsymcrypt_libraries=libsymcrypt_plus.a \
+      -Dsymcrypt_libraries=libsymcrypt_common.a
 expect_failure windows-dll "pass the import .lib; the .dll is a runtime artifact" \
     zig build abi-local -Dtarget=x86_64-windows-msvc -Dsymcrypt_libraries=symcrypt.dll
 expect_failure mlkem-gate "ML-KEM-768 and RFC 10024" \
@@ -50,5 +58,19 @@ sed -i 's/SYMCRYPT_CODE_VERSION_MINOR     13/SYMCRYPT_CODE_VERSION_MINOR     14/
     "$scratch/wrong-version/symcrypt_internal_shared.inc"
 expect_failure wrong-version "expected 103.13.0, found 103.14.0" \
     zig build abi-local -Dheaders_only=true -Dsymcrypt_include_dir="$scratch/wrong-version"
+
+cp ci/symcrypt-fixtures.json "$scratch/altered-provenance.json"
+sed -i 's/286762b7730e2b780678f5ab11fef2b1bad639e0/0000000000000000000000000000000000000000/' \
+    "$scratch/altered-provenance.json"
+expect_failure altered-provenance "manifest commit" \
+    python3 tools/fixture_manifest.py verify \
+      --manifest "$scratch/altered-provenance.json" \
+      --target x86_64-linux-gnu \
+      --linkage dynamic
+[ ! -e zig-out/release/zig-symcrypt-0.1.0.tar.gz ] || {
+    echo "negative provenance test left a release archive" >&2
+    exit 1
+}
+python3 tools/test_fixture_manifest.py
 
 echo "all negative build diagnostics passed"

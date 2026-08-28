@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/microsoft/SymCrypt.git",
+  "tag": "v103.13.0",
+  "commit": "286762b7730e2b780678f5ab11fef2b1bad639e0",
+  "version": {
+    "api": 103,
+    "minor": 13,
+    "patch": 0
+  },
+  "jitterentropy_commit": "887c9871ea110e397812ff7f3b28a6269f0a2ffc",
+  "supported_targets": [
+    "x86_64-linux-gnu",
+    "aarch64-linux-gnu",
+    "x86_64-windows-msvc",
+    "aarch64-windows-msvc"
+  ]
+}

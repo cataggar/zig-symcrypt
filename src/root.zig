@@ -2,6 +2,7 @@ const std = @import("std");
 const options = @import("symcrypt_options");
 const abi = @import("abi.zig");
 const initialization = @import("init.zig");
+pub const symcrypt_version = @import("symcrypt_version.zig");
 
 pub const Version = struct {
     api: u32,
@@ -9,7 +10,11 @@ pub const Version = struct {
     patch: u32,
 };
 
-pub const header_version: Version = .{ .api = 103, .minor = 13, .patch = 0 };
+pub const header_version: Version = .{
+    .api = symcrypt_version.api,
+    .minor = symcrypt_version.minor,
+    .patch = symcrypt_version.patch,
+};
 
 pub const Linkage = enum { dynamic, static };
 pub const linkage: Linkage = if (std.mem.eql(u8, options.linkage, "dynamic")) .dynamic else .static;
