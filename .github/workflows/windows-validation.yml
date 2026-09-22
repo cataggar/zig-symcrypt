@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  attestations: read
 
 concurrency:
   group: windows-validation-${{ github.workflow }}-${{ github.ref }}
@@ -41,9 +42,22 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+      - name: Install Zig via ghr
+        uses: cataggar/ghr/actions/install@c4be68b52d67d7acd2a7fe6c1e5f126e1754176e # v0.8.1
+        env:
+          GH_TOKEN: ${{ github.token }}
         with:
-          version: 0.16.0
+          ghr-version: v0.8.1
+          tools: >-
+            cataggar/zig@v0.16.0
+            RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U
+      - name: Verify native Zig version
+        shell: pwsh
+        run: |
+          $version = zig version
+          if ($version -ne "0.16.0") {
+            throw "Zig version mismatch: found $version, expected 0.16.0"
+          }
       - name: Use provenance-checked x86-64 Zig under Arm64 emulation
         if: matrix.arch == 'aarch64'
         shell: pwsh
@@ -61,6 +75,10 @@ jobs:
           }
           Expand-Archive -LiteralPath $archive -DestinationPath $directory
           $bin = Join-Path $directory "zig-x86_64-windows-0.16.0"
+          $version = & (Join-Path $bin "zig.exe") version
+          if ($version -ne "0.16.0") {
+            throw "emulated x86-64 Zig version mismatch: found $version, expected 0.16.0"
+          }
           $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Build immutable pinned fixtures
         shell: pwsh
@@ -175,9 +193,22 @@ jobs:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
         with:
           persist-credentials: false
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+      - name: Install Zig via ghr
+        uses: cataggar/ghr/actions/install@c4be68b52d67d7acd2a7fe6c1e5f126e1754176e # v0.8.1
+        env:
+          GH_TOKEN: ${{ github.token }}
         with:
-          version: 0.16.0
+          ghr-version: v0.8.1
+          tools: >-
+            cataggar/zig@v0.16.0
+            RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U
+      - name: Verify Zig version
+        shell: pwsh
+        run: |
+          $version = zig version
+          if ($version -ne "0.16.0") {
+            throw "Zig version mismatch: found $version, expected 0.16.0"
+          }
       - name: Compile all pinned public and checked ABI canaries
         shell: pwsh
         run: |
