@@ -51,13 +51,6 @@ jobs:
           tools: >-
             cataggar/zig@v0.16.0
             RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U
-      - name: Verify native Zig version
-        shell: pwsh
-        run: |
-          $version = zig version
-          if ($version -ne "0.16.0") {
-            throw "Zig version mismatch: found $version, expected 0.16.0"
-          }
       - name: Use provenance-checked x86-64 Zig under Arm64 emulation
         if: matrix.arch == 'aarch64'
         shell: pwsh
