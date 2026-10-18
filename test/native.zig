@@ -1,15 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const symcrypt = @import("symcrypt");
-const c = @cImport({
-    if (builtin.target.os.tag == .windows) {
-        @cUndef("_MSC_VER");
-        @cDefine("__GNUC__", "4");
-    }
-    @cDefine("SYMCRYPT_ZIG_IMPORT", "1");
-    @cInclude("stddef.h");
-    @cInclude("symcrypt.h");
-});
+const c = @import("symcrypt_c_raw");
 
 test {
     _ = @import("aead/aes_gcm.zig");
@@ -267,7 +259,7 @@ fn testHkdf(
     algorithm: symcrypt.hmac.Algorithm,
     comptime expected_hex: []const u8,
 ) !void {
-    const ikm = [_]u8{0x0b} ** 22;
+    const ikm: [22]u8 = @splat(0x0b);
     const salt = [_]u8{ 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c };
     const info = [_]u8{ 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9 };
     var output: [42]u8 = undefined;
@@ -396,7 +388,7 @@ test "HKDF vectors limits empty inputs and failure wiping" {
     try std.testing.expectError(error.WrongDataSize, symcrypt.hkdf.derive(.sha256, "", "", "", too_long));
     for (too_long) |byte| try std.testing.expectEqual(@as(u8, 0), byte);
 
-    var full_overlap = [_]u8{0x3c} ** 65;
+    var full_overlap: [65]u8 = @splat(0x3c);
     try std.testing.expectError(
         error.OverlappingBuffers,
         symcrypt.hkdf.derive(
@@ -407,9 +399,9 @@ test "HKDF vectors limits empty inputs and failure wiping" {
             full_overlap[0..],
         ),
     );
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** full_overlap.len), &full_overlap);
+    try std.testing.expectEqualSlices(u8, &(@as([full_overlap.len]u8, @splat(0))), &full_overlap);
 
-    var partial_storage = [_]u8{0x5a} ** 96;
+    var partial_storage: [96]u8 = @splat(0x5a);
     try std.testing.expectError(
         error.OverlappingBuffers,
         symcrypt.hkdf.derive(
@@ -422,11 +414,11 @@ test "HKDF vectors limits empty inputs and failure wiping" {
     );
     try std.testing.expectEqualSlices(
         u8,
-        &([_]u8{0} ** 65),
+        &(@as([65]u8, @splat(0))),
         partial_storage[31..96],
     );
 
-    var reverse_partial_storage = [_]u8{0xc3} ** 96;
+    var reverse_partial_storage: [96]u8 = @splat(0xc3);
     try std.testing.expectError(
         error.OverlappingBuffers,
         symcrypt.hkdf.derive(
@@ -439,11 +431,11 @@ test "HKDF vectors limits empty inputs and failure wiping" {
     );
     try std.testing.expectEqualSlices(
         u8,
-        &([_]u8{0} ** 65),
+        &(@as([65]u8, @splat(0))),
         reverse_partial_storage[0..65],
     );
 
-    const adjacent_info = [_]u8{0x7b} ** 32;
+    const adjacent_info: [32]u8 = @splat(0x7b);
     var expected_adjacent: [65]u8 = undefined;
     try symcrypt.hkdf.derive(.sha256, "ikm", "salt", &adjacent_info, &expected_adjacent);
     var adjacent_storage: [97]u8 = undefined;

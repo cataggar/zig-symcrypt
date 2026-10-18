@@ -124,7 +124,7 @@ fn normalizeUCoordinate(input: *const [encoded_length]u8, output: *[encoded_leng
     @memcpy(output, input);
     output[31] &= 0x7f;
 
-    const modulus = [_]u8{0xed} ++ ([_]u8{0xff} ** 30) ++ [_]u8{0x7f};
+    const modulus = [_]u8{0xed} ++ @as([30]u8, @splat(0xff)) ++ [_]u8{0x7f};
     var greater_or_equal = true;
     var index: usize = encoded_length;
     while (index > 0) {
@@ -257,15 +257,15 @@ fn curveParams() c.PCSYMCRYPT_ECURVE_PARAMS {
 }
 
 test "RFC 7748 u-coordinate normalization" {
-    var input = [_]u8{0xff} ** 32;
+    var input: [32]u8 = @splat(0xff);
     var output: [32]u8 = undefined;
     normalizeUCoordinate(&input, &output);
     try std.testing.expectEqual(@as(u8, 18), output[0]);
     try std.testing.expectEqual(@as(u8, 0), output[31]);
-    input = [_]u8{0} ** 32;
+    input = @splat(0);
     input[31] = 0x80;
     normalizeUCoordinate(&input, &output);
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 32), &output);
+    try std.testing.expectEqualSlices(u8, &(@as([32]u8, @splat(0))), &output);
 }
 
 test "RFC 7748 X25519 known answer" {
@@ -311,7 +311,7 @@ test "RFC 7748 X25519 known answer" {
 }
 
 test "X25519 rejects low-order peers and allocation failure" {
-    const zero = [_]u8{0} ** 32;
+    const zero: [32]u8 = @splat(0);
     const zero_peer = try PublicKey.import(std.testing.allocator, &zero);
     defer zero_peer.deinit();
     const private = try PrivateKey.generate(std.testing.allocator);
@@ -333,11 +333,11 @@ test "X25519 rejects low-order peers and allocation failure" {
 
 test "X25519 public slice entry points reject malformed lengths" {
     try std.testing.expectError(error.InvalidLength, PrivateKey.import(std.testing.allocator, &.{}));
-    try std.testing.expectError(error.InvalidLength, PrivateKey.import(std.testing.allocator, &([_]u8{0} ** 31)));
-    try std.testing.expectError(error.InvalidLength, PrivateKey.import(std.testing.allocator, &([_]u8{0} ** 33)));
+    try std.testing.expectError(error.InvalidLength, PrivateKey.import(std.testing.allocator, &(@as([31]u8, @splat(0)))));
+    try std.testing.expectError(error.InvalidLength, PrivateKey.import(std.testing.allocator, &(@as([33]u8, @splat(0)))));
     try std.testing.expectError(error.InvalidLength, PublicKey.import(std.testing.allocator, &.{}));
-    try std.testing.expectError(error.InvalidLength, PublicKey.import(std.testing.allocator, &([_]u8{0} ** 31)));
-    try std.testing.expectError(error.InvalidLength, PublicKey.import(std.testing.allocator, &([_]u8{0} ** 33)));
+    try std.testing.expectError(error.InvalidLength, PublicKey.import(std.testing.allocator, &(@as([31]u8, @splat(0)))));
+    try std.testing.expectError(error.InvalidLength, PublicKey.import(std.testing.allocator, &(@as([33]u8, @splat(0)))));
 
     const private = try PrivateKey.generate(std.testing.allocator);
     defer private.deinit();
@@ -352,7 +352,7 @@ test "X25519 public slice entry points reject malformed lengths" {
 }
 
 test "RFC 7748 iterative X25519 vectors" {
-    var base = [_]u8{0} ** 32;
+    var base: [32]u8 = @splat(0);
     base[0] = 9;
     var scalar = base;
     var coordinate = base;

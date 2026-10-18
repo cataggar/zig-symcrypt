@@ -50,7 +50,7 @@ def main() -> None:
                     source,
                     destination,
                     ignore=shutil.ignore_patterns(
-                        ".zig-cache", "zig-out", "__pycache__", "*.pyc", "*.a", "*.so",
+                        ".zig-cache", "zig-out", "zig-pkg", "__pycache__", "*.pyc", "*.a", "*.so",
                         "*.so.*", "*.dll", "*.lib", "*.exe", "*.o", "*.obj"
                     ),
                 )

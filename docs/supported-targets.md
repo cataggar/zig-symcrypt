@@ -15,10 +15,10 @@ emulator exists; it remains experimental and cannot satisfy the release gate.
 Linux musl, Windows GNU, 32-bit targets, WASI, and other OSes fail before any
 header or library search with a diagnostic listing the supported triples.
 
-The tested toolchain is Zig 0.16.0 and SymCrypt 103.13.0 at commit
+The tested toolchain is Zig 0.17.0 and SymCrypt 103.13.0 at commit
 `286762b7730e2b780678f5ab11fef2b1bad639e0`.
 The Windows Arm64 runner executes Arm64 outputs natively; CI uses the
-SHA-256-pinned x86-64 Zig compiler under Windows emulation because the 0.16.0
+SHA-256-pinned x86-64 Zig compiler under Windows emulation because the 0.17.0
 native Arm64 compiler exits before build diagnostics on that hosted image.
 To keep that emulated compiler lane bounded, Arm64 runs the complete default
 suite in Debug and ReleaseSafe for both linkages plus one ReleaseSafe execution

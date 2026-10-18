@@ -3,8 +3,8 @@ const symcrypt = @import("symcrypt");
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
-    const key = [_]u8{0x42} ** 16;
-    const nonce = [_]u8{0x24} ** 12;
+    const key: [16]u8 = @splat(0x42);
+    const nonce: [12]u8 = @splat(0x24);
 
     const gcm = try symcrypt.aead.Aes128Gcm.init(allocator, &key);
     defer gcm.deinit();

@@ -931,7 +931,7 @@ test "generated RSA signing, OAEP, exports, and restrictions" {
     try imported_d.verifyPkcs1v15(.sha256, &digest, &pkcs1);
     pkcs1[0] ^= 1;
     try std.testing.expectError(error.InvalidSignature, public.verifyPkcs1v15(.sha256, &digest, &pkcs1));
-    const out_of_range_signature = [_]u8{0xff} ** 256;
+    const out_of_range_signature: [256]u8 = @splat(0xff);
     try std.testing.expectError(
         error.InvalidSignature,
         public.verifyPkcs1v15(.sha256, &digest, &out_of_range_signature),
@@ -955,7 +955,7 @@ test "generated RSA signing, OAEP, exports, and restrictions" {
     if (key.decryptOaep(.sha256, &ciphertext, "wrong", &plaintext)) |_| {
         return error.TestExpectedError;
     } else |_| {}
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &plaintext);
+    try std.testing.expectEqualSlices(u8, &(@as([64]u8, @splat(0))), &plaintext);
     const wrong_key = try PrivateKey.generate(std.testing.allocator, 2048, null, .signing_and_encryption);
     defer wrong_key.deinit();
     const wrong_public = try wrong_key.publicKey(std.testing.allocator);
@@ -973,13 +973,13 @@ test "generated RSA signing, OAEP, exports, and restrictions" {
     if (wrong_key.decryptOaep(.sha256, &ciphertext, "label", &plaintext)) |_| {
         return error.TestExpectedError;
     } else |_| {}
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &plaintext);
-    const out_of_range_ciphertext = [_]u8{0xff} ** 256;
+    try std.testing.expectEqualSlices(u8, &(@as([64]u8, @splat(0))), &plaintext);
+    const out_of_range_ciphertext: [256]u8 = @splat(0xff);
     @memset(&plaintext, 0xa5);
     if (key.decryptOaep(.sha256, &out_of_range_ciphertext, "label", &plaintext)) |_| {
         return error.TestExpectedError;
     } else |_| {}
-    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 64), &plaintext);
+    try std.testing.expectEqualSlices(u8, &(@as([64]u8, @splat(0))), &plaintext);
 
     const sign_only = try PrivateKey.generate(std.testing.allocator, 2048, null, .signing);
     defer sign_only.deinit();
@@ -1008,13 +1008,13 @@ test "RSA validation and allocator failures are fail closed" {
         error.InvalidLength,
         PublicKey.import(std.testing.allocator, &.{1}, 65537, .signing),
     );
-    var leading_zero = [_]u8{0} ** 256;
+    var leading_zero: [256]u8 = @splat(0);
     leading_zero[255] = 1;
     try std.testing.expectError(
         error.InvalidEncoding,
         PublicKey.import(std.testing.allocator, &leading_zero, 65537, .signing),
     );
-    var even_modulus = [_]u8{0xff} ** 256;
+    var even_modulus: [256]u8 = @splat(0xff);
     even_modulus[255] = 0xfe;
     var no_allocation = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     try std.testing.expectError(

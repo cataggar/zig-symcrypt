@@ -1,19 +1,8 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const options = @import("symcrypt_options");
 const pinned = @import("symcrypt_version.zig");
 
-pub const raw = @cImport({
-    if (builtin.target.os.tag == .windows) {
-        // translate-c cannot represent MSVC's i64/ui64 literal suffixes from intsafe.h.
-        @cUndef("_MSC_VER");
-        @cDefine("__GNUC__", "4");
-    }
-    @cDefine("SYMCRYPT_ZIG_IMPORT", "1");
-    @cInclude("stddef.h");
-    @cInclude("symcrypt.h");
-    @cInclude("symcrypt_ec_encoding.h");
-});
+pub const raw = @import("symcrypt_c_raw");
 
 comptime {
     const expected = .{ pinned.api, pinned.minor, pinned.patch };

@@ -1,6 +1,6 @@
 # zig-symcrypt
 
-Zig 0.16.0+ bootstrap package for prebuilt Microsoft SymCrypt 103.13.0
+Zig 0.17.0+ bootstrap package for prebuilt Microsoft SymCrypt 103.13.0
 libraries. It imports pinned C headers for the selected target instead of
 shipping translated bindings, and never uses `dlopen` or `LoadLibrary`.
 

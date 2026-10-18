@@ -162,7 +162,7 @@ pub const PrivateKey = opaque {
         if (!implementation.usage.sign) return error.InvalidUsage;
         if (!hashes.allowedEcdsa(algorithm) or digest.len != hashes.digestLength(algorithm))
             return error.InvalidLength;
-        var raw: [132]u8 = [_]u8{0} ** 132;
+        var raw: [132]u8 = @splat(0);
         defer secure_memory.wipe(&raw);
         const raw_signature = raw[0..implementation.curve.rawSignatureLength()];
         try errors.check(c.SymCryptEcDsaSign(
@@ -317,7 +317,7 @@ fn verifyImpl(
     if (!implementation.usage.sign) return error.InvalidUsage;
     if (!hashes.allowedEcdsa(algorithm) or digest.len != hashes.digestLength(algorithm))
         return error.InvalidLength;
-    var raw: [132]u8 = [_]u8{0} ** 132;
+    var raw: [132]u8 = @splat(0);
     defer secure_memory.wipe(&raw);
     const signature = raw[0..implementation.curve.rawSignatureLength()];
     der.decode(signature_der, implementation.curve.scalarLength(), signature) catch
@@ -498,7 +498,7 @@ test "ECC wrapper allocation failures do not return partial owners" {
 
 test "invalid SEC1 points are rejected for every advertised curve" {
     inline for (.{ Curve.p256, Curve.p384, Curve.p521 }) |selected_curve| {
-        var invalid: [selected_curve.publicLength()]u8 = [_]u8{0} ** selected_curve.publicLength();
+        var invalid: [selected_curve.publicLength()]u8 = @splat(0);
         invalid[0] = 4;
         if (PublicKey.import(std.testing.allocator, selected_curve, &invalid, .agreement)) |key| {
             key.deinit();

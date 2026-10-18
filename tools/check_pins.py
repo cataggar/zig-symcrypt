@@ -22,7 +22,7 @@ ACTION_PINS = {
 }
 GHR_VERSION = "v0.8.1"
 ZIG_TOOL = (
-    "cataggar/zig@v0.16.0 "
+    "cataggar/zig@v0.17.0 "
     "RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U"
 )
 EXPECTED_GHR_STEPS = {
@@ -81,7 +81,7 @@ ghr_step_pattern = re.compile(
     r"(?P=indent)  with:\n"
     rf"(?P=indent)    ghr-version: {GHR_VERSION}\n"
     r"(?P=indent)    tools: >-\n"
-    r"(?P=indent)      cataggar/zig@v0\.16\.0\n"
+    r"(?P=indent)      cataggar/zig@v0\.17\.0\n"
     r"(?P=indent)      RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti\+JO/wCYvhbAb/U$"
 )
 uses_pattern = re.compile(r"(?m)^\s+(?:-\s+)?uses:\s+([^#\s]+)")
