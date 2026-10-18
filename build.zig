@@ -336,32 +336,32 @@ fn configureHeaders(
     options: *std.Build.Step.Options,
 ) void {
     const translate_c = b.dependency("translate_c", .{});
-    const wrapper = b.addWriteFiles().add("symcrypt_c.h",
-        \\#if defined(_WIN32)
-        \\#undef _MSC_VER
-        \\#undef __GNUC__
-        \\#define __GNUC__ 4
-        \\#endif
-        \\#define SYMCRYPT_ZIG_IMPORT 1
-        \\#include <stddef.h>
-        \\#include <symcrypt.h>
-        \\#include <symcrypt_ec_encoding.h>
-        \\
-    );
     const translator: @import("translate_c").Translator = .init(translate_c, .{
         .name = "symcrypt_c_raw",
-        .c_source_file = wrapper,
+        .c_source_file = b.path("src/symcrypt_c.h"),
         .target = module.resolved_target.?,
         .optimize = module.optimize orelse .debug,
         .link_libc = false,
     });
     translator.addIncludePath(include_dir);
+    for (system_include_dirs) |dir| translator.addSystemIncludePath(dir);
     if (checked) translator.defineCMacro("DBG", "1");
 
+    configureHeadersWithRaw(module, include_dir, system_include_dirs, checked, options, translator.mod);
+}
+
+fn configureHeadersWithRaw(
+    module: *std.Build.Module,
+    include_dir: std.Build.LazyPath,
+    system_include_dirs: []const std.Build.LazyPath,
+    checked: bool,
+    options: *std.Build.Step.Options,
+    raw_mod: *std.Build.Module,
+) void {
     module.addIncludePath(include_dir);
     for (system_include_dirs) |dir| module.addSystemIncludePath(dir);
     module.addOptions("symcrypt_options", options);
-    module.addImport("symcrypt_c_raw", translator.mod);
+    module.addImport("symcrypt_c_raw", raw_mod);
     if (checked) module.addCMacro("DBG", "1");
 }
 
@@ -635,6 +635,7 @@ fn addNativeTests(
     test_step: *std.Build.Step,
     test_compile_step: *std.Build.Step,
 ) void {
+    const raw_mod = symcrypt.import_table.get("symcrypt_c_raw").?;
     const native_test_symcrypt = if (linkage == .static) test_module: {
         const test_options = makeOptions(
             b,
@@ -652,7 +653,7 @@ fn addNativeTests(
             .optimize = optimize,
             .link_libc = true,
         });
-        configureHeaders(b, module, include_dir, system_include_dirs, checked, test_options);
+        configureHeadersWithRaw(module, include_dir, system_include_dirs, checked, test_options, raw_mod);
         configureNative(b, module, target, linkage, libraries, true);
         break :test_module module;
     } else symcrypt;
@@ -664,7 +665,7 @@ fn addNativeTests(
         .link_libc = true,
     });
     test_mod.addImport("symcrypt", native_test_symcrypt);
-    test_mod.addImport("symcrypt_c_raw", native_test_symcrypt.import_table.get("symcrypt_c_raw").?);
+    test_mod.addImport("symcrypt_c_raw", raw_mod);
     test_mod.addIncludePath(include_dir);
     for (system_include_dirs) |dir| test_mod.addSystemIncludePath(dir);
     if (checked) test_mod.addCMacro("DBG", "1");
@@ -679,13 +680,13 @@ fn addNativeTests(
         .optimize = optimize,
         .link_libc = true,
     });
-    configureHeaders(
-        b,
+    configureHeadersWithRaw(
         package_test_mod,
         include_dir,
         system_include_dirs,
         checked,
         package_test_options,
+        raw_mod,
     );
     for (symcrypt.link_objects.items) |object| {
         package_test_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
@@ -708,13 +709,13 @@ fn addNativeTests(
         .optimize = optimize,
         .link_libc = true,
     });
-    configureHeaders(
-        b,
+    configureHeadersWithRaw(
         concurrency_mod,
         include_dir,
         system_include_dirs,
         checked,
         concurrency_options,
+        raw_mod,
     );
     for (symcrypt.link_objects.items) |object| {
         concurrency_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
@@ -738,7 +739,7 @@ fn addNativeTests(
             .optimize = optimize,
             .link_libc = true,
         });
-        configureHeaders(b, mismatch_mod, include_dir, system_include_dirs, checked, mismatch_options);
+        configureHeadersWithRaw(mismatch_mod, include_dir, system_include_dirs, checked, mismatch_options, raw_mod);
         for (symcrypt.link_objects.items) |object| mismatch_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
         const mismatch = b.addTest(.{ .root_module = mismatch_mod });
         test_compile_step.dependOn(&mismatch.step);
@@ -758,7 +759,7 @@ fn addNativeTests(
             .optimize = optimize,
             .link_libc = true,
         });
-        configureHeaders(b, api_mismatch_mod, include_dir, system_include_dirs, checked, api_mismatch_options);
+        configureHeadersWithRaw(api_mismatch_mod, include_dir, system_include_dirs, checked, api_mismatch_options, raw_mod);
         for (symcrypt.link_objects.items) |object| api_mismatch_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
         const api_mismatch = b.addTest(.{ .root_module = api_mismatch_mod });
         test_compile_step.dependOn(&api_mismatch.step);
