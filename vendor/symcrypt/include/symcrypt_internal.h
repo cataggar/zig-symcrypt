@@ -303,10 +303,16 @@ C_ASSERT( (SYMCRYPT_ALIGN_VALUE & (SYMCRYPT_ALIGN_VALUE - 1 )) == 0 );
 //
 // XMM related declarations, used in data structures.
 //
+#if defined(SYMCRYPT_ZIG_IMPORT)
+typedef SYMCRYPT_ALIGN_STRUCT _SYMCRYPT_ZIG_M128I {
+    UINT64 u64[2];
+} __m128i;
+#else
 #pragma prefast(push)
 #pragma prefast(disable: 28251, "Windows headers define _mm_clflush with SAL annotation, Intel header doesn't have SAL annotation leading to inconsistent annotation errors")
 #include <emmintrin.h>
 #pragma prefast(pop)
+#endif
 #endif
 
 
@@ -1882,8 +1888,12 @@ typedef union _SYMCRYPT_GCM_SUPPORTED_BLOCKCIPHER_KEYS
 #elif SYMCRYPT_CPU_ARM64
 
     #if defined(SYMCRYPT_ZIG_IMPORT)
-        typedef UINT8 SYMCRYPT_ZIG_N128 __attribute__((vector_size(16)));
-        typedef UINT8 SYMCRYPT_ZIG_N64 __attribute__((vector_size(8)));
+        typedef SYMCRYPT_ALIGN_STRUCT _SYMCRYPT_ZIG_N128 {
+            UINT64 u64[2];
+        } SYMCRYPT_ZIG_N128;
+        typedef struct _SYMCRYPT_ZIG_N64 {
+            UINT64 u64[1];
+        } SYMCRYPT_ZIG_N64;
         #define __n128 SYMCRYPT_ZIG_N128
         #define __n64 SYMCRYPT_ZIG_N64
 

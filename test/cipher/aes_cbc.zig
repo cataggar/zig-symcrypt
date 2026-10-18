@@ -1,16 +1,7 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const symcrypt = @import("symcrypt");
 const common = @import("../common.zig");
-const c = @cImport({
-    if (builtin.target.os.tag == .windows) {
-        @cUndef("_MSC_VER");
-        @cDefine("__GNUC__", "4");
-    }
-    @cDefine("SYMCRYPT_ZIG_IMPORT", "1");
-    @cInclude("stddef.h");
-    @cInclude("symcrypt.h");
-});
+const c = @import("symcrypt_c_raw");
 
 fn testVector(key: []const u8, expected_ciphertext: []const u8) !void {
     const iv = common.bytes("000102030405060708090a0b0c0d0e0f");
@@ -79,30 +70,30 @@ test "AES-CBC is raw unpadded, supports in-place, piecewise, empty, and owned AP
 }
 
 test "AES-CBC rejects invalid keys, blocks, lengths, and overlaps without changing IV/output" {
-    try std.testing.expectError(error.WrongKeySize, symcrypt.cipher.AesKey.init(std.testing.allocator, &([_]u8{0} ** 20)));
-    const aes = try symcrypt.cipher.AesKey.init(std.testing.allocator, &([_]u8{0} ** 16));
+    try std.testing.expectError(error.WrongKeySize, symcrypt.cipher.AesKey.init(std.testing.allocator, &(@as([20]u8, @splat(0)))));
+    const aes = try symcrypt.cipher.AesKey.init(std.testing.allocator, &(@as([16]u8, @splat(0))));
     defer aes.deinit();
-    var iv = [_]u8{0x11} ** 16;
+    var iv: [16]u8 = @splat(0x11);
     const original_iv = iv;
-    var output = [_]u8{0xa5} ** 32;
+    var output: [32]u8 = @splat(0xa5);
     try std.testing.expectError(error.WrongBlockSize, aes.cbcEncrypt(&iv, output[0..15], output[16..31]));
     try std.testing.expectEqual(original_iv, iv);
     try std.testing.expectError(error.WrongDataSize, aes.cbcEncrypt(&iv, output[0..16], output[16..31]));
     try std.testing.expectEqual(original_iv, iv);
 
-    var overlap = [_]u8{0x44} ** 64;
+    var overlap: [64]u8 = @splat(0x44);
     try std.testing.expectError(error.OverlappingBuffers, aes.cbcEncrypt(&iv, overlap[0..32], overlap[1..33]));
     try std.testing.expectError(error.OverlappingBuffers, aes.cbcEncrypt(&iv, overlap[1..33], overlap[0..32]));
     try std.testing.expectError(error.OverlappingBuffers, aes.cbcEncrypt(&iv, overlap[0..32], overlap[0..32]));
     try aes.cbcEncrypt(&iv, overlap[0..16], overlap[16..32]);
 
-    var iv_storage = [_]u8{0} ** 48;
+    var iv_storage: [48]u8 = @splat(0);
     const overlapping_iv: *[16]u8 = @ptrCast(iv_storage[0..16].ptr);
     try std.testing.expectError(error.OverlappingBuffers, aes.cbcEncryptInPlace(overlapping_iv, iv_storage[8..24]));
 }
 
 test "AES-CBC allocation failures and expanded-key/plaintext wiping" {
-    const key = [_]u8{0x23} ** 16;
+    const key: [16]u8 = @splat(0x23);
     var failing_key = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     try std.testing.expectError(error.OutOfMemory, symcrypt.cipher.AesKey.init(failing_key.allocator(), &key));
     const KeyImpl = struct {
@@ -121,17 +112,17 @@ test "AES-CBC allocation failures and expanded-key/plaintext wiping" {
 
     const aes = try symcrypt.cipher.AesKey.init(std.testing.allocator, &key);
     defer aes.deinit();
-    var iv = [_]u8{0} ** 16;
+    var iv: [16]u8 = @splat(0);
     var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
-    try std.testing.expectError(error.OutOfMemory, aes.cbcEncryptAlloc(failing.allocator(), &iv, &([_]u8{0} ** 16)));
+    try std.testing.expectError(error.OutOfMemory, aes.cbcEncryptAlloc(failing.allocator(), &iv, &(@as([16]u8, @splat(0)))));
     var checking_ciphertext = common.WipeCheckingAllocator.init(std.testing.allocator);
-    var owned_ciphertext = try aes.cbcEncryptAlloc(checking_ciphertext.allocator(), &iv, &([_]u8{0} ** 16));
+    var owned_ciphertext = try aes.cbcEncryptAlloc(checking_ciphertext.allocator(), &iv, &(@as([16]u8, @splat(0))));
     owned_ciphertext.deinit();
     try checking_ciphertext.expectSingleZeroedFree(16);
-    iv = [_]u8{0} ** 16;
+    iv = @splat(0);
     var ciphertext: [16]u8 = undefined;
-    try aes.cbcEncrypt(&iv, &([_]u8{0} ** 16), &ciphertext);
-    iv = [_]u8{0} ** 16;
+    try aes.cbcEncrypt(&iv, &(@as([16]u8, @splat(0))), &ciphertext);
+    iv = @splat(0);
     var checking_plaintext = common.WipeCheckingAllocator.init(std.testing.allocator);
     var plaintext = try aes.cbcDecryptAlloc(checking_plaintext.allocator(), &iv, &ciphertext);
     plaintext.deinit();
@@ -140,14 +131,14 @@ test "AES-CBC allocation failures and expanded-key/plaintext wiping" {
 
 const Worker = struct {
     fn run(aes: *const symcrypt.cipher.AesKey, failed: *bool, value: u8) void {
-        var iv = [_]u8{value} ** 16;
-        var data = [_]u8{value} ** 32;
+        var iv: [16]u8 = @splat(value);
+        var data: [32]u8 = @splat(value);
         const expected = data;
         aes.cbcEncryptInPlace(&iv, &data) catch {
             @atomicStore(bool, failed, true, .release);
             return;
         };
-        iv = [_]u8{value} ** 16;
+        iv = @splat(value);
         aes.cbcDecryptInPlace(&iv, &data) catch {
             @atomicStore(bool, failed, true, .release);
             return;
@@ -157,7 +148,7 @@ const Worker = struct {
 };
 
 test "immutable AES expanded keys are reusable concurrently" {
-    const aes = try symcrypt.cipher.AesKey.init(std.testing.allocator, &([_]u8{0x55} ** 32));
+    const aes = try symcrypt.cipher.AesKey.init(std.testing.allocator, &(@as([32]u8, @splat(0x55))));
     defer aes.deinit();
     var failed = false;
     var threads: [8]std.Thread = undefined;

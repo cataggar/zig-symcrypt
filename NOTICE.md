@@ -10,9 +10,10 @@ minor, and patch values `103`, `13`, and `0`.
 
 The internal layout header has a narrowly guarded `SYMCRYPT_ZIG_IMPORT`
 compatibility path: it suppresses one declaration-position Prefast pragma and
-represents ARM64 NEON storage as equivalently sized/aligned Clang vector types
-so Zig's C translator does not import the intrinsic API. Normal C compilation
-of the header remains upstream-identical.
+represents XMM and ARM64 NEON union storage as equivalently sized/aligned plain
+structs so Zig's C translator does not import the intrinsic API or emit vector
+fields inside `extern union`. Normal C compilation of the header remains
+upstream-identical.
 
 The bundled upstream license and notice are in
 `vendor/symcrypt/LICENSE.txt` and `vendor/symcrypt/NOTICE.txt`. SymCrypt is

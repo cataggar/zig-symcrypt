@@ -112,7 +112,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    configureHeaders(symcrypt, include_dir, system_include_dirs, checked, options);
+    configureHeaders(b, symcrypt, include_dir, system_include_dirs, checked, options);
 
     if (target_ok and libraries_ok and !headers_only) {
         configureNative(b, symcrypt, target, linkage, libraries, false);
@@ -277,8 +277,6 @@ pub fn build(b: *std.Build) void {
             @tagName(optimize),
             "--linkage",
             @tagName(linkage),
-            "--include",
-            include_dir.getPath(b),
             "--checked",
             if (checked) "true" else "false",
             "--legacy",
@@ -286,6 +284,8 @@ pub fn build(b: *std.Build) void {
             "--legacy-rsa",
             if (legacy_rsa) "true" else "false",
         });
+        archive.addArg("--include");
+        archive.addDirectoryArg(include_dir);
         for (libraries) |library| {
             archive.addArg("--library");
             archive.addFileArg(library);
@@ -328,15 +328,40 @@ fn makeOptions(
 }
 
 fn configureHeaders(
+    b: *std.Build,
     module: *std.Build.Module,
     include_dir: std.Build.LazyPath,
     system_include_dirs: []const std.Build.LazyPath,
     checked: bool,
     options: *std.Build.Step.Options,
 ) void {
+    const translate_c = b.dependency("translate_c", .{});
+    const wrapper = b.addWriteFiles().add("symcrypt_c.h",
+        \\#if defined(_WIN32)
+        \\#undef _MSC_VER
+        \\#undef __GNUC__
+        \\#define __GNUC__ 4
+        \\#endif
+        \\#define SYMCRYPT_ZIG_IMPORT 1
+        \\#include <stddef.h>
+        \\#include <symcrypt.h>
+        \\#include <symcrypt_ec_encoding.h>
+        \\
+    );
+    const translator: @import("translate_c").Translator = .init(translate_c, .{
+        .name = "symcrypt_c_raw",
+        .c_source_file = wrapper,
+        .target = module.resolved_target.?,
+        .optimize = module.optimize orelse .debug,
+        .link_libc = false,
+    });
+    translator.addIncludePath(include_dir);
+    if (checked) translator.defineCMacro("DBG", "1");
+
     module.addIncludePath(include_dir);
     for (system_include_dirs) |dir| module.addSystemIncludePath(dir);
     module.addOptions("symcrypt_options", options);
+    module.addImport("symcrypt_c_raw", translator.mod);
     if (checked) module.addCMacro("DBG", "1");
 }
 
@@ -577,10 +602,10 @@ fn addAbiMatrix(
             const module = b.createModule(.{
                 .root_source_file = b.path("src/root.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = .debug,
                 .link_libc = true,
             });
-            configureHeaders(module, include_dir, system_include_dirs, checked, options);
+            configureHeaders(b, module, include_dir, system_include_dirs, checked, options);
             const object = b.addObject(.{
                 .name = b.fmt("abi-{s}-{s}-{s}", .{
                     @tagName(target.result.cpu.arch),
@@ -627,7 +652,7 @@ fn addNativeTests(
             .optimize = optimize,
             .link_libc = true,
         });
-        configureHeaders(module, include_dir, system_include_dirs, checked, test_options);
+        configureHeaders(b, module, include_dir, system_include_dirs, checked, test_options);
         configureNative(b, module, target, linkage, libraries, true);
         break :test_module module;
     } else symcrypt;
@@ -639,6 +664,7 @@ fn addNativeTests(
         .link_libc = true,
     });
     test_mod.addImport("symcrypt", native_test_symcrypt);
+    test_mod.addImport("symcrypt_c_raw", native_test_symcrypt.import_table.get("symcrypt_c_raw").?);
     test_mod.addIncludePath(include_dir);
     for (system_include_dirs) |dir| test_mod.addSystemIncludePath(dir);
     if (checked) test_mod.addCMacro("DBG", "1");
@@ -654,6 +680,7 @@ fn addNativeTests(
         .link_libc = true,
     });
     configureHeaders(
+        b,
         package_test_mod,
         include_dir,
         system_include_dirs,
@@ -682,6 +709,7 @@ fn addNativeTests(
         .link_libc = true,
     });
     configureHeaders(
+        b,
         concurrency_mod,
         include_dir,
         system_include_dirs,
@@ -710,7 +738,7 @@ fn addNativeTests(
             .optimize = optimize,
             .link_libc = true,
         });
-        configureHeaders(mismatch_mod, include_dir, system_include_dirs, checked, mismatch_options);
+        configureHeaders(b, mismatch_mod, include_dir, system_include_dirs, checked, mismatch_options);
         for (symcrypt.link_objects.items) |object| mismatch_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
         const mismatch = b.addTest(.{ .root_module = mismatch_mod });
         test_compile_step.dependOn(&mismatch.step);
@@ -730,7 +758,7 @@ fn addNativeTests(
             .optimize = optimize,
             .link_libc = true,
         });
-        configureHeaders(api_mismatch_mod, include_dir, system_include_dirs, checked, api_mismatch_options);
+        configureHeaders(b, api_mismatch_mod, include_dir, system_include_dirs, checked, api_mismatch_options);
         for (symcrypt.link_objects.items) |object| api_mismatch_mod.link_objects.append(b.allocator, object) catch @panic("OOM");
         const api_mismatch = b.addTest(.{ .root_module = api_mismatch_mod });
         test_compile_step.dependOn(&api_mismatch.step);
@@ -801,8 +829,6 @@ fn addConsumerExample(
         canonicalTargetTriple(b, target),
         "--optimize",
         @tagName(optimize),
-        "--include",
-        include_dir.getPath(b),
         "--checked",
         if (checked) "true" else "false",
         "--legacy",
@@ -810,6 +836,8 @@ fn addConsumerExample(
         "--legacy-rsa",
         if (legacy_rsa) "true" else "false",
     });
+    command.addArg("--include");
+    command.addDirectoryArg(include_dir);
     if (provenance) |manifest| {
         command.addArg("--provenance");
         command.addFileArg(manifest);

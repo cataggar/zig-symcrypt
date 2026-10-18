@@ -46,7 +46,7 @@ pub fn decode(der: []const u8, scalar_len: usize, raw_output: []u8) Error!void {
         return error.InvalidEncoding;
     if (sequence_end != der.len) return error.InvalidEncoding;
 
-    var temporary: [132]u8 = [_]u8{0} ** 132;
+    var temporary: [132]u8 = @splat(0);
     try readInteger(der, &cursor, sequence_end, temporary[0..scalar_len]);
     try readInteger(der, &cursor, sequence_end, temporary[scalar_len .. scalar_len * 2]);
     if (cursor != sequence_end) return error.InvalidEncoding;
@@ -146,7 +146,7 @@ fn readInteger(
 
 test "canonical DER round trips and P-521 long length" {
     inline for (.{ 32, 48, 66 }) |scalar_len| {
-        var raw: [scalar_len * 2]u8 = [_]u8{0} ** (scalar_len * 2);
+        var raw: [scalar_len * 2]u8 = @splat(0);
         raw[0] = 0x80;
         raw[scalar_len] = 1;
         var der: [141]u8 = undefined;
@@ -168,15 +168,15 @@ test "malformed DER is rejected without partial output" {
         &.{ 0x30, 0x81, 0x06, 0x02, 0x01, 1, 0x02, 0x01, 1 },
     };
     for (malformed) |der| {
-        var raw: [64]u8 = [_]u8{0xa5} ** 64;
+        var raw: [64]u8 = @splat(0xa5);
         try std.testing.expectError(error.InvalidEncoding, decode(der, 32, &raw));
-        try std.testing.expectEqualSlices(u8, &([_]u8{0xa5} ** 64), &raw);
+        try std.testing.expectEqualSlices(u8, &(@as([64]u8, @splat(0xa5))), &raw);
     }
 
-    var short_output = [_]u8{0xa5} ** 8;
-    const raw = [_]u8{1} ** 64;
+    var short_output: [8]u8 = @splat(0xa5);
+    const raw: [64]u8 = @splat(1);
     try std.testing.expectError(error.InvalidLength, encode(&raw, 32, &short_output));
-    try std.testing.expectEqualSlices(u8, &([_]u8{0xa5} ** 8), &short_output);
+    try std.testing.expectEqualSlices(u8, &(@as([8]u8, @splat(0xa5))), &short_output);
 }
 
 test "DER rejects malformed encodings and curve-width mismatches at every width" {
@@ -191,15 +191,15 @@ test "DER rejects malformed encodings and curve-width mismatches at every width"
     };
     inline for (.{ 32, 48, 66 }) |scalar_len| {
         for (malformed) |signature| {
-            var output: [scalar_len * 2]u8 = [_]u8{0xa5} ** (scalar_len * 2);
+            var output: [scalar_len * 2]u8 = @splat(0xa5);
             try std.testing.expectError(error.InvalidEncoding, decode(signature, scalar_len, &output));
             try std.testing.expectEqualSlices(
                 u8,
-                &([_]u8{0xa5} ** (scalar_len * 2)),
+                &(@as([scalar_len * 2]u8, @splat(0xa5))),
                 &output,
             );
         }
-        var raw: [scalar_len * 2]u8 = [_]u8{1} ** (scalar_len * 2);
+        var raw: [scalar_len * 2]u8 = @splat(1);
         var encoded: [141]u8 = undefined;
         const encoded_len = try encode(&raw, scalar_len, &encoded);
         var decoded: [scalar_len * 2]u8 = undefined;
@@ -214,7 +214,7 @@ test "DER rejects malformed encodings and curve-width mismatches at every width"
         );
     }
 
-    var overwide = [_]u8{0} ** 74;
+    var overwide: [74]u8 = @splat(0);
     overwide[0] = 0x30;
     overwide[1] = 72;
     overwide[2] = 0x02;
@@ -228,7 +228,7 @@ test "DER rejects malformed encodings and curve-width mismatches at every width"
         try std.testing.expectError(error.InvalidEncoding, decode(&overwide, scalar_len, &output));
     }
 
-    var raw384 = [_]u8{0} ** 96;
+    var raw384: [96]u8 = @splat(0);
     raw384[0] = 1;
     raw384[48] = 1;
     var der384: [104]u8 = undefined;
@@ -236,7 +236,7 @@ test "DER rejects malformed encodings and curve-width mismatches at every width"
     var raw256: [64]u8 = undefined;
     try std.testing.expectError(error.InvalidEncoding, decode(der384[0..der384_len], 32, &raw256));
 
-    var raw521 = [_]u8{0} ** 132;
+    var raw521: [132]u8 = @splat(0);
     raw521[0] = 1;
     raw521[66] = 1;
     var der521: [141]u8 = undefined;

@@ -49,11 +49,11 @@ jobs:
         with:
           ghr-version: v0.8.1
           tools: >-
-            cataggar/zig@v0.16.0
+            cataggar/zig@v0.17.0
             RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U
       - name: Verify Zig version
         shell: bash
-        run: test "$(zig version)" = "0.16.0"
+        run: test "$(zig version)" = "0.17.0"
       - name: Prepare pinned upstream dependency and tools
         shell: bash
         run: |
@@ -87,9 +87,9 @@ jobs:
             -Dlinkage=dynamic \
             -Dsymcrypt_provenance="$manifest" \
             "${libraries[@]}" --summary all
-          zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+          zig build test -Dtarget=${{ matrix.target }} -Doptimize=safe \
             -Dlinkage=dynamic "${libraries[@]}" --summary all
-          for optimize in Debug ReleaseSafe; do
+          for optimize in debug safe; do
             zig build test -Dtarget=${{ matrix.target }} -Doptimize="$optimize" \
               -Dlinkage=dynamic -Dlegacy=true "${libraries[@]}" --summary all
             zig build test -Dtarget=${{ matrix.target }} -Doptimize="$optimize" \
@@ -97,9 +97,9 @@ jobs:
               -Denable_legacy_rsa_pkcs1_encryption=true \
               "${libraries[@]}" --summary all
           done
-          zig build example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+          zig build example -Dtarget=${{ matrix.target }} -Doptimize=safe \
             -Dlinkage=dynamic "${libraries[@]}"
-          zig build consumer-example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+          zig build consumer-example -Dtarget=${{ matrix.target }} -Doptimize=safe \
             -Dlinkage=dynamic "${libraries[@]}"
       - name: Verify and execute complete static matrix
         shell: bash
@@ -118,9 +118,9 @@ jobs:
             -Dlinkage=static \
             -Dsymcrypt_provenance="$manifest" \
             "${libraries[@]}" --summary all
-          zig build test -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+          zig build test -Dtarget=${{ matrix.target }} -Doptimize=safe \
             -Dlinkage=static "${libraries[@]}" --summary all
-          for optimize in Debug ReleaseSafe; do
+          for optimize in debug safe; do
             zig build test -Dtarget=${{ matrix.target }} -Doptimize="$optimize" \
               -Dlinkage=static -Dlegacy=true "${libraries[@]}" --summary all
             zig build test -Dtarget=${{ matrix.target }} -Doptimize="$optimize" \
@@ -128,9 +128,9 @@ jobs:
               -Denable_legacy_rsa_pkcs1_encryption=true \
               "${libraries[@]}" --summary all
           done
-          zig build example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+          zig build example -Dtarget=${{ matrix.target }} -Doptimize=safe \
             -Dlinkage=static "${libraries[@]}"
-          zig build consumer-example -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe \
+          zig build consumer-example -Dtarget=${{ matrix.target }} -Doptimize=safe \
             -Dlinkage=static "${libraries[@]}"
       - name: Exercise actual release packaging and atomic failure cleanup
         if: matrix.arch == 'x86_64'

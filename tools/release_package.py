@@ -91,6 +91,7 @@ def copy_package(package_root: pathlib.Path) -> None:
                 ignore=shutil.ignore_patterns(
                     ".zig-cache",
                     "zig-out",
+                    "zig-pkg",
                     "__pycache__",
                     "*.pyc",
                     "*.dll",

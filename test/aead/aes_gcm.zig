@@ -1,16 +1,7 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const symcrypt = @import("symcrypt");
 const common = @import("../common.zig");
-const c = @cImport({
-    if (builtin.target.os.tag == .windows) {
-        @cUndef("_MSC_VER");
-        @cDefine("__GNUC__", "4");
-    }
-    @cDefine("SYMCRYPT_ZIG_IMPORT", "1");
-    @cInclude("stddef.h");
-    @cInclude("symcrypt.h");
-});
+const c = @import("symcrypt_c_raw");
 
 fn testVector(
     comptime Gcm: type,
@@ -82,7 +73,7 @@ test "AES-GCM detached, in-place, owned, tag lengths, and repeated use" {
         }
     }
 
-    var in_place = [_]u8{0x33} ** 48;
+    var in_place: [48]u8 = @splat(0x33);
     const original = in_place;
     var tag: [16]u8 = undefined;
     try gcm.sealInPlace(&nonce, "aad", &in_place, &tag);
@@ -111,44 +102,44 @@ test "AES-GCM authentication failures always wipe the complete destination" {
 
     var bad_ciphertext = ciphertext;
     bad_ciphertext[0] ^= 1;
-    var output = [_]u8{0xa5} ** ciphertext.len;
+    var output: [ciphertext.len]u8 = @splat(0xa5);
     try std.testing.expectError(error.AuthenticationFailure, gcm.open(&nonce, "authenticated data", &bad_ciphertext, &output, &tag));
-    try std.testing.expectEqual([_]u8{0} ** output.len, output);
+    try std.testing.expectEqual(@as([output.len]u8, @splat(0)), output);
 
-    output = [_]u8{0xa5} ** output.len;
+    output = @splat(0xa5);
     try std.testing.expectError(error.AuthenticationFailure, gcm.open(&nonce, "altered data", &ciphertext, &output, &tag));
-    try std.testing.expectEqual([_]u8{0} ** output.len, output);
+    try std.testing.expectEqual(@as([output.len]u8, @splat(0)), output);
 
     var bad_nonce = nonce;
     bad_nonce[0] ^= 1;
-    output = [_]u8{0xa5} ** output.len;
+    output = @splat(0xa5);
     try std.testing.expectError(error.AuthenticationFailure, gcm.open(&bad_nonce, "authenticated data", &ciphertext, &output, &tag));
-    try std.testing.expectEqual([_]u8{0} ** output.len, output);
+    try std.testing.expectEqual(@as([output.len]u8, @splat(0)), output);
 
     var bad_tag = tag;
     bad_tag[15] ^= 1;
-    output = [_]u8{0xa5} ** output.len;
+    output = @splat(0xa5);
     try std.testing.expectError(error.AuthenticationFailure, gcm.open(&nonce, "authenticated data", &ciphertext, &output, &bad_tag));
-    try std.testing.expectEqual([_]u8{0} ** output.len, output);
+    try std.testing.expectEqual(@as([output.len]u8, @splat(0)), output);
 
-    output = [_]u8{0xa5} ** output.len;
+    output = @splat(0xa5);
     try std.testing.expectError(error.AuthenticationFailure, wrong_gcm.open(&nonce, "authenticated data", &ciphertext, &output, &tag));
-    try std.testing.expectEqual([_]u8{0} ** output.len, output);
+    try std.testing.expectEqual(@as([output.len]u8, @splat(0)), output);
 
     var in_place = ciphertext;
     try std.testing.expectError(error.AuthenticationFailure, gcm.openInPlace(&nonce, "authenticated data", &in_place, &bad_tag));
-    try std.testing.expectEqual([_]u8{0} ** in_place.len, in_place);
+    try std.testing.expectEqual(@as([in_place.len]u8, @splat(0)), in_place);
 
     for (12..17) |tag_len| {
         var short_tag: [16]u8 = undefined;
         try gcm.seal(&nonce, "authenticated data", plaintext, &ciphertext, short_tag[0..tag_len]);
         short_tag[tag_len - 1] ^= 1;
-        output = [_]u8{0xa5} ** output.len;
+        output = @splat(0xa5);
         try std.testing.expectError(
             error.AuthenticationFailure,
             gcm.open(&nonce, "authenticated data", &ciphertext, &output, short_tag[0..tag_len]),
         );
-        try std.testing.expectEqual([_]u8{0} ** output.len, output);
+        try std.testing.expectEqual(@as([output.len]u8, @splat(0)), output);
     }
 
     var empty_tag: [16]u8 = undefined;
@@ -160,9 +151,9 @@ test "AES-GCM authentication failures always wipe the complete destination" {
 
 const GcmWorker = struct {
     fn run(gcm: *const symcrypt.aead.Aes128Gcm, failed: *bool, index: usize) void {
-        var nonce = [_]u8{0} ** 12;
+        var nonce: [12]u8 = @splat(0);
         std.mem.writeInt(u64, nonce[4..12], index, .little);
-        var data = [_]u8{0x6a} ** 64;
+        var data: [64]u8 = @splat(0x6a);
         const expected = data;
         var tag: [16]u8 = undefined;
         gcm.sealInPlace(&nonce, "aad", &data, &tag) catch {
@@ -178,7 +169,7 @@ const GcmWorker = struct {
 };
 
 test "immutable AES-GCM expanded keys are reusable concurrently" {
-    const gcm = try symcrypt.aead.Aes128Gcm.init(std.testing.allocator, &([_]u8{0x55} ** 16));
+    const gcm = try symcrypt.aead.Aes128Gcm.init(std.testing.allocator, &(@as([16]u8, @splat(0x55))));
     defer gcm.deinit();
     var failed = false;
     var threads: [8]std.Thread = undefined;
@@ -188,20 +179,20 @@ test "immutable AES-GCM expanded keys are reusable concurrently" {
 }
 
 test "AES-GCM rejects invalid lengths and every unsafe overlap before mutation" {
-    try std.testing.expectError(error.WrongKeySize, symcrypt.aead.Aes128Gcm.init(std.testing.allocator, &([_]u8{0} ** 24)));
-    const key = [_]u8{0} ** 16;
-    const nonce = [_]u8{1} ** 12;
+    try std.testing.expectError(error.WrongKeySize, symcrypt.aead.Aes128Gcm.init(std.testing.allocator, &(@as([24]u8, @splat(0)))));
+    const key: [16]u8 = @splat(0);
+    const nonce: [12]u8 = @splat(1);
     const gcm = try symcrypt.aead.Aes128Gcm.init(std.testing.allocator, &key);
     defer gcm.deinit();
-    var dst = [_]u8{0xa5} ** 16;
-    var tag = [_]u8{0x5a} ** 16;
+    var dst: [16]u8 = @splat(0xa5);
+    var tag: [16]u8 = @splat(0x5a);
     try std.testing.expectError(error.WrongNonceSize, gcm.seal("", "", &dst, &dst, &tag));
-    try std.testing.expectEqual([_]u8{0xa5} ** 16, dst);
-    try std.testing.expectEqual([_]u8{0x5a} ** 16, tag);
+    try std.testing.expectEqual(@as([16]u8, @splat(0xa5)), dst);
+    try std.testing.expectEqual(@as([16]u8, @splat(0x5a)), tag);
     try std.testing.expectError(error.WrongTagSize, gcm.seal(&nonce, "", &dst, &dst, tag[0..11]));
     try std.testing.expectError(error.WrongDataSize, gcm.seal(&nonce, "", dst[0..15], &dst, &tag));
 
-    var overlap = [_]u8{0x44} ** 80;
+    var overlap: [80]u8 = @splat(0x44);
     try std.testing.expectError(error.OverlappingBuffers, gcm.seal(&nonce, "", overlap[0..32], overlap[1..33], overlap[48..64]));
     try std.testing.expectError(error.OverlappingBuffers, gcm.seal(&nonce, "", overlap[1..33], overlap[0..32], overlap[48..64]));
     try std.testing.expectError(error.OverlappingBuffers, gcm.seal(&nonce, "", overlap[0..32], overlap[0..32], overlap[48..64]));
@@ -237,8 +228,8 @@ test "AES-GCM validators match pinned SymCrypt and cover boundaries" {
 }
 
 test "AES-GCM allocation failures and exact state/plaintext wiping" {
-    const key = [_]u8{0x11} ** 16;
-    const nonce = [_]u8{0x22} ** 12;
+    const key: [16]u8 = @splat(0x11);
+    const nonce: [12]u8 = @splat(0x22);
     var failing_key = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     try std.testing.expectError(error.OutOfMemory, symcrypt.aead.Aes128Gcm.init(failing_key.allocator(), &key));
 

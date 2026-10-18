@@ -12,3 +12,5 @@
 /.zig-callback-check/
 /zig-out/
 **/zig-out/
+/zig-pkg/
+**/zig-pkg/

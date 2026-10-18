@@ -71,7 +71,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--provenance", required=True)
     parser.add_argument("--target", required=True)
-    parser.add_argument("--optimize", default="ReleaseSafe")
+    parser.add_argument("--optimize", default="safe")
     parser.add_argument("--linkage", choices=("dynamic", "static"), required=True)
     parser.add_argument("--library", action="append", default=[])
     parser.add_argument("--later-stage", action="store_true")

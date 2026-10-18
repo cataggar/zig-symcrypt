@@ -26,8 +26,8 @@ test "ChaCha20-Poly1305 RFC 8439 known-answer and owned round trip" {
 }
 
 test "ChaCha20-Poly1305 empty, multiblock, in-place, and authentication wiping" {
-    const key = [_]u8{0x31} ** 32;
-    const nonce = [_]u8{0x42} ** 12;
+    const key: [32]u8 = @splat(0x31);
+    const nonce: [12]u8 = @splat(0x42);
     var empty: [0]u8 = .{};
     var empty_tag: [16]u8 = undefined;
     try symcrypt.aead.ChaCha20Poly1305.sealInPlace(&key, &nonce, "", &empty, &empty_tag);
@@ -50,49 +50,49 @@ test "ChaCha20-Poly1305 empty, multiblock, in-place, and authentication wiping" 
     try symcrypt.aead.ChaCha20Poly1305.seal(&key, &nonce, "aad", &original, &ciphertext, &tag);
     var bad_tag = tag;
     bad_tag[0] ^= 1;
-    var output = [_]u8{0xa5} ** ciphertext.len;
+    var output: [ciphertext.len]u8 = @splat(0xa5);
     try std.testing.expectError(error.AuthenticationFailure, symcrypt.aead.ChaCha20Poly1305.open(&key, &nonce, "aad", &ciphertext, &output, &bad_tag));
-    try std.testing.expectEqual([_]u8{0} ** output.len, output);
+    try std.testing.expectEqual(@as([output.len]u8, @splat(0)), output);
 
     var bad_ciphertext = ciphertext;
     bad_ciphertext[0] ^= 1;
-    output = [_]u8{0xa5} ** output.len;
+    output = @splat(0xa5);
     try std.testing.expectError(error.AuthenticationFailure, symcrypt.aead.ChaCha20Poly1305.open(&key, &nonce, "aad", &bad_ciphertext, &output, &tag));
-    try std.testing.expectEqual([_]u8{0} ** output.len, output);
+    try std.testing.expectEqual(@as([output.len]u8, @splat(0)), output);
 
     var bad_nonce = nonce;
     bad_nonce[0] ^= 1;
-    output = [_]u8{0xa5} ** output.len;
+    output = @splat(0xa5);
     try std.testing.expectError(error.AuthenticationFailure, symcrypt.aead.ChaCha20Poly1305.open(&key, &bad_nonce, "aad", &ciphertext, &output, &tag));
-    try std.testing.expectEqual([_]u8{0} ** output.len, output);
+    try std.testing.expectEqual(@as([output.len]u8, @splat(0)), output);
 
-    output = [_]u8{0xa5} ** output.len;
+    output = @splat(0xa5);
     try std.testing.expectError(error.AuthenticationFailure, symcrypt.aead.ChaCha20Poly1305.open(&key, &nonce, "bad", &ciphertext, &output, &tag));
-    try std.testing.expectEqual([_]u8{0} ** output.len, output);
+    try std.testing.expectEqual(@as([output.len]u8, @splat(0)), output);
 
     var wrong_key = key;
     wrong_key[0] ^= 1;
-    output = [_]u8{0xa5} ** output.len;
+    output = @splat(0xa5);
     try std.testing.expectError(error.AuthenticationFailure, symcrypt.aead.ChaCha20Poly1305.open(&wrong_key, &nonce, "aad", &ciphertext, &output, &tag));
-    try std.testing.expectEqual([_]u8{0} ** output.len, output);
+    try std.testing.expectEqual(@as([output.len]u8, @splat(0)), output);
 
     var in_place = ciphertext;
     try std.testing.expectError(error.AuthenticationFailure, symcrypt.aead.ChaCha20Poly1305.openInPlace(&key, &nonce, "aad", &in_place, &bad_tag));
-    try std.testing.expectEqual([_]u8{0} ** in_place.len, in_place);
+    try std.testing.expectEqual(@as([in_place.len]u8, @splat(0)), in_place);
 }
 
 test "ChaCha20-Poly1305 validates lengths, overlap, allocation failure, and limits" {
-    const key = [_]u8{0x11} ** 32;
-    const nonce = [_]u8{0x22} ** 12;
-    var output = [_]u8{0xa5} ** 32;
-    var tag = [_]u8{0x5a} ** 16;
+    const key: [32]u8 = @splat(0x11);
+    const nonce: [12]u8 = @splat(0x22);
+    var output: [32]u8 = @splat(0xa5);
+    var tag: [16]u8 = @splat(0x5a);
     try std.testing.expectError(error.WrongKeySize, symcrypt.aead.ChaCha20Poly1305.seal(key[0..31], &nonce, "", &output, &output, &tag));
-    try std.testing.expectEqual([_]u8{0xa5} ** output.len, output);
+    try std.testing.expectEqual(@as([output.len]u8, @splat(0xa5)), output);
     try std.testing.expectError(error.WrongNonceSize, symcrypt.aead.ChaCha20Poly1305.seal(&key, nonce[0..11], "", &output, &output, &tag));
     try std.testing.expectError(error.WrongTagSize, symcrypt.aead.ChaCha20Poly1305.seal(&key, &nonce, "", &output, &output, tag[0..15]));
     try std.testing.expectError(error.WrongDataSize, symcrypt.aead.ChaCha20Poly1305.seal(&key, &nonce, "", output[0..31], &output, &tag));
 
-    var overlap = [_]u8{0x33} ** 96;
+    var overlap: [96]u8 = @splat(0x33);
     try std.testing.expectError(error.OverlappingBuffers, symcrypt.aead.ChaCha20Poly1305.seal(&key, &nonce, "", overlap[0..32], overlap[1..33], overlap[64..80]));
     try std.testing.expectError(error.OverlappingBuffers, symcrypt.aead.ChaCha20Poly1305.seal(&key, &nonce, "", overlap[1..33], overlap[0..32], overlap[64..80]));
     try std.testing.expectError(error.OverlappingBuffers, symcrypt.aead.ChaCha20Poly1305.seal(&key, &nonce, "", overlap[0..32], overlap[0..32], overlap[64..80]));
@@ -124,9 +124,9 @@ test "ChaCha20-Poly1305 validates lengths, overlap, allocation failure, and limi
 
 const Worker = struct {
     fn run(key: *const [32]u8, failed: *bool, index: usize) void {
-        var nonce = [_]u8{0} ** 12;
+        var nonce: [12]u8 = @splat(0);
         std.mem.writeInt(u64, nonce[4..12], index, .little);
-        var data = [_]u8{0x6d} ** 64;
+        var data: [64]u8 = @splat(0x6d);
         const expected = data;
         var tag: [16]u8 = undefined;
         symcrypt.aead.ChaCha20Poly1305.sealInPlace(key, &nonce, "aad", &data, &tag) catch {
@@ -142,7 +142,7 @@ const Worker = struct {
 };
 
 test "ChaCha20-Poly1305 operations are concurrent" {
-    const key = [_]u8{0x77} ** 32;
+    const key: [32]u8 = @splat(0x77);
     var failed = false;
     var threads: [8]std.Thread = undefined;
     for (&threads, 0..) |*thread, index| thread.* = try std.Thread.spawn(.{}, Worker.run, .{ &key, &failed, index });

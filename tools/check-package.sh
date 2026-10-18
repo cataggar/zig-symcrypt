@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 if grep -R -n -E '(\.\./SymCrypt|/d/SymCrypt|/d/rust-symcrypt)' \
     --exclude=check-package.sh \
-    --exclude-dir=.git --exclude-dir=.zig-cache --exclude-dir=.tools \
+    --exclude-dir=.git --exclude-dir=.zig-cache --exclude-dir=zig-pkg --exclude-dir=.tools \
     --exclude-dir=.symcrypt-build --exclude-dir=.symcrypt-zig-build \
     --exclude-dir=.symcrypt-ci --exclude-dir=.symcrypt-ci-source .; then
     echo "package contains a developer-local reference path" >&2
@@ -14,7 +14,7 @@ fi
 
 if find . -type f \( -name '*.a' -o -name '*.so' -o -name '*.so.*' -o \
     -name '*.dll' -o -name '*.lib' -o -name '*.exe' -o -name '*.o' -o -name '*.obj' \) \
-    -not -path './.git/*' -not -path '*/.zig-cache/*' -not -path '*/zig-out/*' \
+    -not -path './.git/*' -not -path '*/.zig-cache/*' -not -path '*/zig-out/*' -not -path '*/zig-pkg/*' \
     -not -path './.symcrypt-ci/*' -not -path './.symcrypt-ci-source/*' \
     -not -path './.symcrypt-build/*' -not -path './.symcrypt-zig-build/*' \
     -print | grep .; then
