@@ -87,9 +87,8 @@ jobs:
           $manifest = "$fixture/provenance.json"
           $plus = "$fixture/lib/symcrypt_plus_NoCIL.lib"
           $core = "$fixture/dll/symcrypt_zig_103_13.lib"
-          $jobs = if ("${{ matrix.arch }}" -eq "aarch64") { @("-j1") } else { @() }
           $env:Path = "$fixture/dll;$env:Path"
-          zig build abi-release-gate @jobs `
+          zig build abi-release-gate `
             -Dtarget=${{ matrix.target }} `
             -Dlinkage=dynamic `
             -Dsymcrypt_provenance="$manifest" `
@@ -97,16 +96,13 @@ jobs:
             -Dsymcrypt_libraries="$core" `
             --summary all
           if ($LASTEXITCODE -ne 0) { throw "dynamic ABI release gate failed" }
-          $optimizes = if ("${{ matrix.arch }}" -eq "x86_64") { @("debug", "safe") } else { @("safe") }
-          foreach ($optimize in $optimizes) {
-            zig build test @jobs -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
-              -Dlinkage=dynamic -Dsymcrypt_provenance="$manifest" `
-              -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
-              --summary all
-            if ($LASTEXITCODE -ne 0) { throw "dynamic $optimize tests failed" }
-          }
           if ("${{ matrix.arch }}" -eq "x86_64") {
             foreach ($optimize in @("debug", "safe")) {
+              zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
+                -Dlinkage=dynamic -Dsymcrypt_provenance="$manifest" `
+                -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
+                --summary all
+              if ($LASTEXITCODE -ne 0) { throw "dynamic $optimize tests failed" }
               zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
                 -Dlinkage=dynamic -Dlegacy=true -Dsymcrypt_provenance="$manifest" `
                 -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
@@ -119,18 +115,23 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "dynamic legacy RSA $optimize tests failed" }
             }
           } else {
-            zig build test @jobs -Dtarget=${{ matrix.target }} -Doptimize=safe `
+            zig build test -j1 -Dtarget=${{ matrix.target }} -Doptimize=safe `
+              -Dlinkage=dynamic -Dsymcrypt_provenance="$manifest" `
+              -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
+              --summary all
+            if ($LASTEXITCODE -ne 0) { throw "dynamic safe tests failed" }
+            zig build test -j1 -Dtarget=${{ matrix.target }} -Doptimize=safe `
               -Dlinkage=dynamic -Dlegacy=true `
               -Dsymcrypt_provenance="$manifest" `
               -Denable_legacy_rsa_pkcs1_encryption=true `
               -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
             if ($LASTEXITCODE -ne 0) { throw "dynamic Arm64 legacy gates failed" }
           }
-          zig build example @jobs -Dtarget=${{ matrix.target }} -Doptimize=safe `
+          zig build example -Dtarget=${{ matrix.target }} -Doptimize=safe `
             -Dlinkage=dynamic -Dsymcrypt_provenance="$manifest" `
             -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core"
           if ($LASTEXITCODE -ne 0) { throw "dynamic examples failed" }
-          zig build consumer-example @jobs -Dtarget=${{ matrix.target }} -Doptimize=safe `
+          zig build consumer-example -Dtarget=${{ matrix.target }} -Doptimize=safe `
             -Dlinkage=dynamic -Dsymcrypt_provenance="$manifest" `
             -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core"
           if ($LASTEXITCODE -ne 0) { throw "dynamic consumer failed" }
@@ -141,8 +142,7 @@ jobs:
           $manifest = "$fixture/provenance.json"
           $plus = "$fixture/lib/symcrypt_plus_NoCIL.lib"
           $core = "$fixture/lib/symcrypt_static_NoCIL.lib"
-          $jobs = if ("${{ matrix.arch }}" -eq "aarch64") { @("-j1") } else { @() }
-          zig build abi-release-gate @jobs `
+          zig build abi-release-gate `
             -Dtarget=${{ matrix.target }} `
             -Dlinkage=static `
             -Dsymcrypt_provenance="$manifest" `
@@ -150,15 +150,12 @@ jobs:
             -Dsymcrypt_libraries="$core" `
             --summary all
           if ($LASTEXITCODE -ne 0) { throw "static ABI release gate failed" }
-          $optimizes = if ("${{ matrix.arch }}" -eq "x86_64") { @("debug", "safe") } else { @("safe") }
-          foreach ($optimize in $optimizes) {
-            zig build test @jobs -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
-              -Dlinkage=static -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
-              --summary all
-            if ($LASTEXITCODE -ne 0) { throw "static $optimize tests failed" }
-          }
           if ("${{ matrix.arch }}" -eq "x86_64") {
             foreach ($optimize in @("debug", "safe")) {
+              zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
+                -Dlinkage=static -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
+                --summary all
+              if ($LASTEXITCODE -ne 0) { throw "static $optimize tests failed" }
               zig build test -Dtarget=${{ matrix.target }} "-Doptimize=$optimize" `
                 -Dlinkage=static -Dlegacy=true `
                 -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
@@ -170,16 +167,20 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "static legacy RSA $optimize tests failed" }
             }
           } else {
-            zig build test @jobs -Dtarget=${{ matrix.target }} -Doptimize=safe `
+            zig build test -j1 -Dtarget=${{ matrix.target }} -Doptimize=safe `
+              -Dlinkage=static -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" `
+              --summary all
+            if ($LASTEXITCODE -ne 0) { throw "static safe tests failed" }
+            zig build test -j1 -Dtarget=${{ matrix.target }} -Doptimize=safe `
               -Dlinkage=static -Dlegacy=true `
               -Denable_legacy_rsa_pkcs1_encryption=true `
               -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core" --summary all
             if ($LASTEXITCODE -ne 0) { throw "static Arm64 legacy gates failed" }
           }
-          zig build example @jobs -Dtarget=${{ matrix.target }} -Doptimize=safe `
+          zig build example -Dtarget=${{ matrix.target }} -Doptimize=safe `
             -Dlinkage=static -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core"
           if ($LASTEXITCODE -ne 0) { throw "static examples failed" }
-          zig build consumer-example @jobs -Dtarget=${{ matrix.target }} -Doptimize=safe `
+          zig build consumer-example -Dtarget=${{ matrix.target }} -Doptimize=safe `
             -Dlinkage=static -Dsymcrypt_libraries="$plus" -Dsymcrypt_libraries="$core"
           if ($LASTEXITCODE -ne 0) { throw "static consumer failed" }
 
