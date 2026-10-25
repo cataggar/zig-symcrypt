@@ -18,9 +18,9 @@ EXPECTED = {
 }
 ACTION_PINS = {
     "actions/checkout": "f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a",
-    "cataggar/ghr/actions/install": "c4be68b52d67d7acd2a7fe6c1e5f126e1754176e",
+    "cataggar/ghr/actions/install": "a3be8c61b9d5c2bd6d38e6d067c69d70434a6db9",
 }
-GHR_VERSION = "v0.8.1"
+GHR_VERSION = "v0.9.1"
 ZIG_TOOL = (
     "cataggar/zig@v0.17.0 "
     "RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U"
